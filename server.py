@@ -1,6 +1,7 @@
 """FastAPI backend for CompStats — includes background scraper thread."""
 from __future__ import annotations
 import json, os, threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,7 +10,22 @@ import uvicorn
 
 import db, analyse
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import scheduler as sched
+    interval_h = float(os.environ.get("SCRAPE_INTERVAL_H", "24"))
+    def _loop():
+        import time
+        sched.run_once()
+        while True:
+            time.sleep(interval_h * 3600)
+            sched.run_once()
+    threading.Thread(target=_loop, daemon=True).start()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 ROOT = Path(__file__).parent
 
 
@@ -77,19 +93,6 @@ def maps_meta(tiers: str = ""):
     rows = analyse.map_meta_stats(tiers=tier_list)
     return JSONResponse(rows)
 
-
-@app.on_event("startup")
-def start_scheduler():
-    import scheduler as sched
-    interval_h = float(os.environ.get("SCRAPE_INTERVAL_H", "24"))
-    def _loop():
-        import time
-        sched.run_once()
-        while True:
-            time.sleep(interval_h * 3600)
-            sched.run_once()
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
 
 
 if __name__ == "__main__":
