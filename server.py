@@ -37,11 +37,11 @@ def index():
 @app.get("/api/stats")
 def stats():
     con = db.connect()
-    n_matches = con.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-    n_maps    = con.execute("SELECT COUNT(*) FROM map_results").fetchone()[0]
-    tiers     = [dict(r) for r in con.execute(
+    n_matches = db.fetchone(con, "SELECT COUNT(*) as n FROM matches")["n"]
+    n_maps    = db.fetchone(con, "SELECT COUNT(*) as n FROM map_results")["n"]
+    tiers     = [dict(r) for r in db.fetchall(con,
         "SELECT tier, COUNT(*) as n FROM matches GROUP BY tier ORDER BY tier"
-    ).fetchall()]
+    )]
     return JSONResponse({"matches": n_matches, "map_results": n_maps, "tiers": tiers})
 
 
@@ -50,18 +50,16 @@ def maps_list(tiers: str = ""):
     con = db.connect()
     tier_list = [t.strip() for t in tiers.split(",") if t.strip()]
     if tier_list:
-        rows = con.execute(
+        rows = db.fetchall(con,
             f"SELECT DISTINCT mr.map_name FROM map_results mr "
             f"JOIN matches m ON m.id=mr.match_id "
-            f"WHERE m.tier IN ({','.join('?'*len(tier_list))}) "
+            f"WHERE m.tier IN ({','.join(['?']*len(tier_list))}) "
             f"ORDER BY mr.map_name",
             tier_list
-        ).fetchall()
+        )
     else:
-        rows = con.execute(
-            "SELECT DISTINCT map_name FROM map_results ORDER BY map_name"
-        ).fetchall()
-    return JSONResponse([r[0] for r in rows])
+        rows = db.fetchall(con, "SELECT DISTINCT map_name FROM map_results ORDER BY map_name")
+    return JSONResponse([r["map_name"] for r in rows])
 
 
 def _lst(s: str):
@@ -71,12 +69,12 @@ def _lst(s: str):
 @app.get("/api/filters")
 def filters():
     con = db.connect()
-    seasons = [r[0] for r in con.execute(
+    seasons = [r["season"] for r in db.fetchall(con,
         "SELECT DISTINCT season FROM matches WHERE season IS NOT NULL ORDER BY season DESC"
-    ).fetchall()]
-    regions = [r[0] for r in con.execute(
+    )]
+    regions = [r["region"] for r in db.fetchall(con,
         "SELECT DISTINCT region FROM matches WHERE region IS NOT NULL ORDER BY region"
-    ).fetchall()]
+    )]
     return JSONResponse({"seasons": seasons, "regions": regions})
 
 
