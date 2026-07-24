@@ -12,7 +12,7 @@ Add to Windows startup:
     Action: python.exe  "C:\...\compstats\scheduler.py"
 """
 from __future__ import annotations
-import argparse, time, sys
+import argparse, os, time, sys
 from datetime import datetime
 
 import db, scraper
@@ -27,9 +27,10 @@ def run_once() -> tuple[int, int]:
     con = db.connect()
     new = skipped = 0
 
-    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] Fetching event list…")
+    max_pages = int(os.environ.get("SCRAPE_MAX_PAGES", "100"))
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] Fetching event list (max_pages={max_pages})…")
     try:
-        events = scraper.event_ids(completed=True) + scraper.event_ids(completed=False)
+        events = scraper.event_ids(completed=True, max_pages=max_pages) + scraper.event_ids(completed=False, max_pages=max_pages)
     except Exception as e:
         print(f"  ERROR fetching events: {e}")
         return 0, 0
@@ -72,8 +73,8 @@ def run_once() -> tuple[int, int]:
         if event_new:
             print(f"  {tier:2} {name}: +{event_new} matches")
 
-    n_matches = con.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
-    n_maps    = con.execute("SELECT COUNT(*) FROM map_results").fetchone()[0]
+    n_matches = db.fetchone(con, "SELECT COUNT(*) as n FROM matches")["n"]
+    n_maps    = db.fetchone(con, "SELECT COUNT(*) as n FROM map_results")["n"]
     print(f"  Done. DB: {n_matches} matches · {n_maps} map results  (+{new} new, {skipped} skipped)")
     return new, skipped
 
