@@ -244,7 +244,7 @@ function aggComps() {
     if (!agg[r.comp]) agg[r.comp] = {
       comp:r.comp, wins:0, total:0,
       atk_wins:0, atk_rounds:0, def_wins:0, def_rounds:0,
-      nm_wins:0, nm_total:0, agents:{}, luMap:{}
+      nm_wins:0, nm_total:0, agents:{}, luMap:{}, teamMap:{}
     };
     const a = agg[r.comp];
     a.wins       += r.wins;
@@ -263,6 +263,11 @@ function aggComps() {
       a.luMap[lk].wins  += lu.wins;
       a.luMap[lk].total += lu.total;
     }
+    for (const tm of r.teams || []) {
+      if (!a.teamMap[tm.team]) a.teamMap[tm.team] = { wins: 0, total: 0 };
+      a.teamMap[tm.team].wins  += tm.wins;
+      a.teamMap[tm.team].total += tm.total;
+    }
   }
   return Object.values(agg).map(c => ({
     comp:           c.comp,
@@ -279,6 +284,10 @@ function aggComps() {
       .map(lu => ({ ...lu, win_pct: lu.total ? lu.wins/lu.total*100 : 0 }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 12),
+    teams:          Object.entries(c.teamMap)
+      .map(([team, s]) => ({ team, wins: s.wins, total: s.total, win_pct: s.total ? s.wins/s.total*100 : 0 }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 20),
   }));
 }
 
@@ -642,9 +651,7 @@ function emptyRow(msg) {
 function fmt(v, suffix='%') { return v != null ? v.toFixed(1) + suffix : '—'; }
 
 function buildAgentExpansion(r) {
-  if (!r.lineups?.length)
-    return '<span style="color:#62696D;font-size:12px;padding:4px 0;display:block">No lineup data yet.</span>';
-  return r.lineups.map(lu => {
+  const lineupHtml = (r.lineups?.length ? r.lineups.map(lu => {
     const wr = lu.win_pct;
     const icons = lu.agents.map(ag => {
       const ad = S.agentData[ag];
@@ -668,7 +675,25 @@ function buildAgentExpansion(r) {
         <span style="font-family:ui-monospace,monospace;font-size:12px;color:${wrColor(wr)}">${wr.toFixed(1)}%</span>
       </div>
     </div>`;
-  }).join('');
+  }).join('') : '<span style="color:#62696D;font-size:12px">No lineup data yet.</span>');
+
+  const teamsHtml = (r.teams?.length ? `
+    <div style="margin-top:10px">
+      <div style="font-size:10px;font-weight:600;color:#62696D;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">Teams</div>
+      ${r.teams.map(tm => `
+        <div style="display:flex;align-items:center;gap:10px;padding:3px 0;border-bottom:1px solid #1B1E2444">
+          <span style="font-size:12px;color:#C9D1D9;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tm.team}</span>
+          <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D;white-space:nowrap">${tm.wins}W–${tm.total - tm.wins}L</span>
+          <div style="display:flex;align-items:center;gap:6px;flex:none">
+            <div style="width:44px;height:3px;background:#262A32">
+              <div style="height:3px;width:${barW(tm.win_pct)};background:${wrColor(tm.win_pct)}"></div>
+            </div>
+            <span style="font-family:ui-monospace,monospace;font-size:11px;color:${wrColor(tm.win_pct)};width:38px;text-align:right">${tm.win_pct.toFixed(1)}%</span>
+          </div>
+        </div>`).join('')}
+    </div>` : '');
+
+  return lineupHtml + teamsHtml;
 }
 
 function buildCompsTable(rows) {

@@ -50,7 +50,8 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
     tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)
     rows = db.fetchall(con, f"""
         SELECT mr.map_name, mr.agents_a, mr.agents_b, mr.winner,
-               mr.a_atk_wins, mr.a_def_wins, mr.b_atk_wins, mr.b_def_wins
+               mr.a_atk_wins, mr.a_def_wins, mr.b_atk_wins, mr.b_def_wins,
+               m.team_a, m.team_b
         FROM map_results mr JOIN matches m ON m.id = mr.match_id
         WHERE 1=1 {tier_clause} {map_clause}
     """, params)
@@ -59,6 +60,7 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
     stats: dict[tuple, list] = defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0, 0])
     agent_counts: dict[tuple, dict] = defaultdict(lambda: defaultdict(int))
     lineup_stats: dict[tuple, dict] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    team_stats: dict[tuple, dict] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
 
     for row in rows:
         d = dict(row)
@@ -73,14 +75,15 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
         comp_a = classify_comp(agents_a)
         comp_b = classify_comp(agents_b)
 
-        for side, winner, agents, comp, opp in [
-            ("agents_a", "A", agents_a, comp_a, comp_b),
-            ("agents_b", "B", agents_b, comp_b, comp_a),
+        for side, winner, agents, comp, opp, team in [
+            ("agents_a", "A", agents_a, comp_a, comp_b, d.get("team_a") or ""),
+            ("agents_b", "B", agents_b, comp_b, comp_a, d.get("team_b") or ""),
         ]:
             key = (comp, d["map_name"])
             s = stats[key]
             s[1] += 1
-            if d["winner"] == winner:
+            won = d["winner"] == winner
+            if won:
                 s[0] += 1
 
             if have_rounds:
@@ -93,7 +96,7 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
 
             if comp != opp:
                 s[7] += 1
-                if d["winner"] == winner:
+                if won:
                     s[6] += 1
 
             for agent in agents:
@@ -101,8 +104,13 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
 
             lineup = tuple(sorted(agents))
             lineup_stats[key][lineup][1] += 1
-            if d["winner"] == winner:
+            if won:
                 lineup_stats[key][lineup][0] += 1
+
+            if team:
+                team_stats[key][team][1] += 1
+                if won:
+                    team_stats[key][team][0] += 1
 
     result = []
     for (comp, map_n), s in stats.items():
@@ -125,6 +133,12 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
                  for lu, (w, t) in lineup_stats[(comp, map_n)].items()],
                 key=lambda x: -x["total"]
             )[:10],
+            "teams": sorted(
+                [{"team": tm, "wins": w, "total": t,
+                  "win_pct": round(w / t * 100, 1) if t else 0}
+                 for tm, (w, t) in team_stats[(comp, map_n)].items()],
+                key=lambda x: -x["total"]
+            )[:20],
         })
     return sorted(result, key=lambda r: -r["total"])
 
