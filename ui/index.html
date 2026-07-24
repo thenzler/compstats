@@ -37,9 +37,9 @@
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-left:8px">
       <span style="font-size:10px;color:#62696D;letter-spacing:0.08em">MATCHES</span>
-      <span id="hdr-matches" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
-      <span style="font-size:10px;color:#62696D;letter-spacing:0.08em;margin-left:6px">MAP RESULTS</span>
-      <span id="hdr-maps" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
+      <span id="hdr-matches" title="Total matches in database" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
+      <span style="font-size:10px;color:#62696D;letter-spacing:0.08em;margin-left:6px">MAPS</span>
+      <span id="hdr-maps" title="Total map results in database" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
     </div>
     <div style="flex:1"></div>
     <div style="display:flex;align-items:center;gap:6px;background:#131519;border:1px solid #262A32;padding:3px 8px;width:240px">
@@ -90,7 +90,7 @@
       <div style="border-top:1px solid #262A32;padding:12px">
         <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:12px">Sample thresholds</div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
-          <span style="font-size:12px;color:#9AA0A8">Min matches</span>
+          <span style="font-size:12px;color:#9AA0A8">Min maps</span>
           <span id="lbl-min-matches" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">10</span>
         </div>
         <input id="sl-min-matches" type="range" min="1" max="200" step="1" value="10" style="margin-bottom:16px"/>
@@ -140,6 +140,8 @@
 
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
+
+const CONF_LOW = 15, CONF_MED = 30;
 
 const TIERS = [
   { key:'T1', label:'VCT International', short:'T1', color:'#FF4655', bg:'#2A1217' },
@@ -357,6 +359,15 @@ async function loadFilters() {
     const { seasons, regions } = await res.json();
     S.availSeasons = seasons;
     S.availRegions = regions;
+    // Apply URL-encoded season/region filters now that we know what's available
+    if (S._urlSeasons) {
+      S.availSeasons.forEach(s => { S.seasons[s] = S._urlSeasons.includes(s); });
+      delete S._urlSeasons;
+    }
+    if (S._urlRegions) {
+      S.availRegions.forEach(r => { S.regions[r] = S._urlRegions.includes(r); });
+      delete S._urlRegions;
+    }
   } catch(e) { console.warn('filters unavailable', e); }
 }
 
@@ -429,7 +440,7 @@ function renderSidebar() {
     el.innerHTML = `<span style="width:7px;height:7px;border-radius:1px;background:${on ? t.color : '#3A3F47'};flex:none"></span>
       <span style="font-weight:600;font-size:10px;color:${on ? t.color : '#62696D'};letter-spacing:.06em;min-width:20px">${t.short}</span>
       <span style="font-size:11px;color:${on ? '#9AA0A8' : '#3A3F47'}">${t.label}</span>`;
-    el.onclick = () => { S.tiers[t.key] = !S.tiers[t.key]; fetchData(); };
+    el.onclick = () => { S.tiers[t.key] = !S.tiers[t.key]; updateURL(); fetchData(); };
     pills.appendChild(el);
   });
   const active = activeTiers();
@@ -447,7 +458,7 @@ function renderSidebar() {
       el.className = 'pill';
       el.style.cssText = `padding:3px 8px;font-size:11px;border:1px solid ${on?'#3A3F47':'#1E2127'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#62696D'}`;
       el.textContent = k;
-      el.onclick = () => { stateObj[k] = !on; onChange(); };
+      el.onclick = () => { stateObj[k] = !on; updateURL(); onChange(); };
       c.appendChild(el);
     });
   }
@@ -469,7 +480,7 @@ function renderSidebar() {
         <span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.map}</span>
       </div>
       <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D;flex:none">${num(m.total)}</span>`;
-    el.onclick = () => { S.map = on ? null : m.map; fetchData(); };
+    el.onclick = () => { S.map = on ? null : m.map; updateURL(); fetchData(); };
     list.appendChild(el);
   });
 }
@@ -656,6 +667,60 @@ function emptyRow(msg) {
   return el;
 }
 
+// ── Matchup cache + loader ────────────────────────────────────────────────────
+
+const S_matchupCache = {};
+
+async function loadMatchupSection(r, container) {
+  const cacheKey = r.comp + '|' + (S.map||'') + '|' + tierParam();
+  let data = S_matchupCache[cacheKey];
+  if (!data) {
+    const mu = document.createElement('div');
+    mu.innerHTML = '<div style="font-size:11px;color:#62696D;padding:8px 0">Loading matchups…</div>';
+    container.appendChild(mu);
+    try {
+      const res = await fetch(`/api/comp/matchups?comp=${encodeURIComponent(r.comp)}&tiers=${encodeURIComponent(tierParam())}&map=${encodeURIComponent(S.map||'')}`);
+      data = await res.json();
+      S_matchupCache[cacheKey] = data;
+      mu.remove();
+    } catch(e) {
+      mu.innerHTML = '';
+      return;
+    }
+  }
+  if (!data.length) return;
+  const section = document.createElement('div');
+  section.style.cssText = 'margin-top:12px';
+  section.innerHTML = `
+    <div style="font-size:10px;font-weight:600;color:#62696D;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px">Matchup Record</div>
+    ${data.slice(0,10).map(mu => `
+      <div style="display:flex;align-items:center;gap:10px;padding:3px 0;border-bottom:1px solid #1B1E2444">
+        <span style="font-family:ui-monospace,monospace;font-size:11px;color:#9AA0A8;min-width:96px">${mu.opp}</span>
+        <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D;white-space:nowrap">${mu.wins}W–${mu.total - mu.wins}L</span>
+        <div style="display:flex;align-items:center;gap:6px;flex:1">
+          <div style="flex:1;height:3px;background:#262A32;max-width:60px">
+            <div style="height:3px;width:${Math.max(2,Math.min(100,(mu.win_pct-35)/30*100)).toFixed(1)}%;background:${mu.win_pct>=52?'#46A758':mu.win_pct>=47.5?'#5B8DEF':'#E5484D'}"></div>
+          </div>
+          <span style="font-family:ui-monospace,monospace;font-size:11px;color:${mu.win_pct>=52?'#46A758':mu.win_pct>=47.5?'#5B8DEF':'#E5484D'};width:38px;text-align:right">${mu.win_pct.toFixed(1)}%</span>
+        </div>
+      </div>`).join('')}
+  `;
+  container.appendChild(section);
+}
+
+// ── CSV export ───────────────────────────────────────────────────────────────
+
+function exportCSV(rows, cols) {
+  const header = cols.map(c => c.label).join(',');
+  const body = rows.map(r => cols.map(c => {
+    const v = c.csvVal ? c.csvVal(r) : (r[c.key] ?? '');
+    return typeof v === 'string' && v.includes(',') ? `"${v}"` : v;
+  }).join(',')).join('\n');
+  const blob = new Blob([header + '\n' + body], {type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'compstats.csv'; a.click();
+}
+
 // ── Comps table ───────────────────────────────────────────────────────────────
 
 function fmt(v, suffix='%') { return v != null ? v.toFixed(1) + suffix : '—'; }
@@ -716,27 +781,46 @@ function buildCompsTable(rows) {
   const COLS = [
     { w:'44px',              label:'#' },
     { w:'minmax(190px,1fr)', label:'Archetype',     sort:'comp',       asc:true },
-    { w:'96px',              label:'Matches',        sort:'total',      right:true },
+    { w:'96px',              label:'Maps',           sort:'total',      right:true },
     { w:'168px',             label:'Non-Mirror WR',  sort:'nm_win_pct', pl:true },
     { w:'72px',              label:'Atk WR',         sort:'atk_wr',     right:true },
     { w:'72px',              label:'Def WR',         sort:'def_wr',     right:true },
   ];
   const wrap = document.createElement('div');
+  wrap.style.position = 'relative';
   wrap.appendChild(hdrRow(COLS, 'comps'));
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = '↓ CSV';
+  exportBtn.style.cssText = 'position:absolute;right:14px;top:6px;font-size:10px;color:#62696D;background:transparent;border:1px solid #262A32;padding:2px 8px;cursor:pointer;font-family:inherit;z-index:3';
+  exportBtn.onclick = () => exportCSV(rows, [
+    {label:'Comp', key:'comp'},
+    {label:'Maps', key:'total'},
+    {label:'Win%', csvVal: r => r.win_pct != null ? r.win_pct.toFixed(1) : ''},
+    {label:'NM Win%', csvVal: r => r.nm_win_pct != null ? r.nm_win_pct.toFixed(1) : ''},
+    {label:'Atk WR', csvVal: r => r.atk_wr != null ? r.atk_wr.toFixed(1) : ''},
+    {label:'Def WR', csvVal: r => r.def_wr != null ? r.def_wr.toFixed(1) : ''},
+  ]);
+  wrap.appendChild(exportBtn);
   if (!rows.length) {
-    wrap.appendChild(emptyRow('No archetypes meet current thresholds. Lower min matches or enable more tiers.'));
+    wrap.appendChild(emptyRow(`No archetypes with ≥${S.minMatches} maps for current filters — try lowering the threshold or selecting more tiers/regions.`));
     return wrap;
   }
   rows.forEach((r, i) => {
     const wr    = r.nm_win_pct;
     const tierColor = wr != null ? (wr >= 53 ? '#5B8DEF' : wr >= 50 ? '#3BB9C4' : '#262A32') : '#262A32';
     const isOpen = S.expanded.has(r.comp);
+    const lowConf = r.total < CONF_LOW;
+    const medConf = !lowConf && r.total < CONF_MED;
+    const confTitle = lowConf ? ` title="Low sample (${r.total} maps)"` : '';
+    const wrOpacity = lowConf ? 'opacity:0.5;' : '';
+    const barOpacity = medConf ? 'opacity:0.75;' : (lowConf ? 'opacity:0.5;' : '');
+    const confBadge = lowConf ? `<sup style="color:#62696D;font-size:9px" title="Low sample">*</sup>` : '';
     const el = document.createElement('div');
     el.className = 'row-hover';
     el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid ${isOpen?'transparent':'#1B1E24'};height:34px;padding:0 14px;cursor:pointer;background:${isOpen?'#131519':''}`;
     el.innerHTML = `
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
-      <div style="display:flex;align-items:center;gap:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:6px;overflow:hidden"${confTitle}>
         <span style="font-size:10px;color:#3A3F47;width:10px;flex:none">${isOpen?'▾':'▸'}</span>
         <span style="width:3px;height:14px;background:${tierColor};flex:none"></span>
         <div style="display:flex;gap:2px;flex:none">${archSquares(r.comp)}</div>
@@ -748,10 +832,10 @@ function buildCompsTable(rows) {
       </div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
         ${wr!=null?`
-          <div style="width:70px;height:4px;background:#262A32;flex:none">
+          <div style="width:70px;height:4px;background:#262A32;flex:none;${barOpacity}">
             <div style="height:4px;width:${barW(wr)};background:${wrColor(wr)}"></div>
           </div>
-          <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${wr.toFixed(1)}%</span>
+          <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA;${wrOpacity}"><span style="${wrOpacity}">${wr.toFixed(1)}%</span>${confBadge}</span>
           <span style="font-size:10px;color:#62696D">(${r.win_pct.toFixed(1)} all)</span>
         `:`<span style="font-family:ui-monospace,monospace;font-size:12px;color:#62696D">—</span>`}
       </div>
@@ -766,6 +850,7 @@ function buildCompsTable(rows) {
       const sub = document.createElement('div');
       sub.style.cssText = 'background:#131519;border-bottom:1px solid #1B1E24;padding:10px 14px 14px 58px';
       sub.innerHTML = buildAgentExpansion(r);
+      loadMatchupSection(r, sub);
       wrap.appendChild(sub);
     }
   });
@@ -801,7 +886,7 @@ function buildAgentsTable(rows) {
         <span style="font-size:13px;color:#E8E9EA">${r.name}</span>
       </div>
       <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#9AA0A8">
-        ${ad?.roleIcon ? `<img src="${ad.roleIcon}" style="width:13px;height:13px;opacity:0.65">` : `<span style="width:6px;height:6px;background:${rc}"></span>`}
+        ${ad?.roleIcon ? `<img src="${ad.roleIcon}" style="width:13px;height:13px;opacity:0.65" onerror="this.style.display='none'">` : `<span style="width:6px;height:6px;background:${rc}"></span>`}
         ${r.role}
       </div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${r.pick.toFixed(1)}%</div>
@@ -863,7 +948,7 @@ function buildMapsTable(rows) {
         ${top ? '<div style="display:flex;gap:2px;flex:none">' + archSquares(top.comp) + '</div>' : ''}
         <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#9AA0A8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${topLabel}</span>
       </div>`;
-    el.onclick = () => { S.map = S.map === r.name ? null : r.name; fetchData(); };
+    el.onclick = () => { S.map = S.map === r.name ? null : r.name; updateURL(); fetchData(); };
     wrap.appendChild(el);
   });
   return wrap;
@@ -879,17 +964,51 @@ function renderStatusBar() {
     `sort: <span style="color:#9AA0A8;font-family:ui-monospace,'SF Mono',Menlo,monospace">${key} ${dir===-1?'desc':'asc'}</span>`;
 }
 
+// ── URL state ────────────────────────────────────────────────────────────────
+
+function updateURL() {
+  const p = new URLSearchParams();
+  const activeTierKeys = TIERS.filter(t => S.tiers[t.key]).map(t => t.key);
+  if (activeTierKeys.length < TIERS.length) p.set('tiers', activeTierKeys.join(','));
+  if (S.map) p.set('map', S.map);
+  const aS = activeSeasons(); if (aS.length && aS.length < S.availSeasons.length) p.set('seasons', aS.join(','));
+  const aR = activeRegions(); if (aR.length && aR.length < S.availRegions.length) p.set('regions', aR.join(','));
+  if (S.tab !== 'comps') p.set('tab', S.tab);
+  const qs = p.toString();
+  history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+}
+
+function loadStateFromURL() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('tiers')) {
+    const keys = p.get('tiers').split(',');
+    TIERS.forEach(t => { S.tiers[t.key] = keys.includes(t.key); });
+  }
+  if (p.has('map')) S.map = p.get('map');
+  if (p.has('tab') && ['comps','agents','maps'].includes(p.get('tab'))) S.tab = p.get('tab');
+  // seasons/regions loaded after filters API call — handled in renderSidebar via S.seasons/S.regions
+  if (p.has('seasons')) {
+    const keys = p.get('seasons').split(',');
+    // will be applied after availSeasons is populated — store for later
+    S._urlSeasons = keys;
+  }
+  if (p.has('regions')) {
+    const keys = p.get('regions').split(',');
+    S._urlRegions = keys;
+  }
+}
+
 // ── Events ───────────────────────────────────────────────────────────────────
 
 ['comps','agents','maps'].forEach(k => {
   document.getElementById('tab-'+k).onclick = () => {
-    S.tab = k; renderTabs(); renderMain();
+    S.tab = k; updateURL(); renderTabs(); renderMain();
   };
 });
 
-document.getElementById('map-all-btn').onclick    = () => { S.map = null; fetchData(); };
-document.getElementById('season-all-btn').onclick = () => { S.availSeasons.forEach(s => delete S.seasons[s]); fetchData(); };
-document.getElementById('region-all-btn').onclick = () => { S.availRegions.forEach(r => delete S.regions[r]); fetchData(); };
+document.getElementById('map-all-btn').onclick    = () => { S.map = null; updateURL(); fetchData(); };
+document.getElementById('season-all-btn').onclick = () => { S.availSeasons.forEach(s => delete S.seasons[s]); updateURL(); fetchData(); };
+document.getElementById('region-all-btn').onclick = () => { S.availRegions.forEach(r => delete S.regions[r]); updateURL(); fetchData(); };
 
 let _st;
 document.getElementById('search').oninput = e => {
@@ -909,8 +1028,20 @@ document.getElementById('sl-min-pick').oninput = e => {
   renderMain();
 };
 
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === '1') { S.tab = 'comps';   updateURL(); render(); }
+  if (e.key === '2') { S.tab = 'agents';  updateURL(); render(); }
+  if (e.key === '3') { S.tab = 'maps';    updateURL(); render(); }
+  if (e.key === 'Escape') { S.map = null; updateURL(); fetchData(); }
+  if (e.key === '/') { e.preventDefault(); document.getElementById('search').focus(); }
+});
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
+loadStateFromURL();
 fetchData();
 </script>
 </body>
