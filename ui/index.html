@@ -1,531 +1,668 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CompStats</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANTI-STRAT · CompStats</title>
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --base:       #0B0C0E;
-  --surface:    #131519;
-  --surface-r:  #1B1E24;
-  --border:     #262A32;
-  --text-pri:   #E8E9EA;
-  --text-sec:   #9AA0A8;
-  --text-ter:   #62696D;
-  --accent:     #F0B429;
-  --win:        #46A758;
-  --loss:       #E5484D;
-  --gc:         #9B66D8;
-  --t1:         #F0B429;
-  --t2:         #3BB9C4;
-  --t3:         #9AA0A8;
-  --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
-}
-
-html, body { height: 100%; background: var(--base); color: var(--text-pri); font-family: var(--font); font-size: 13px; }
-
-/* ── Layout ── */
-.layout { display: grid; grid-template-rows: 44px 1fr; height: 100vh; }
-
-header {
-  display: flex; align-items: center; gap: 16px;
-  padding: 0 20px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 10;
-}
-header .brand { font-size: 11px; letter-spacing: .12em; color: var(--text-ter); font-weight: 600; }
-header .divider { width: 1px; height: 18px; background: var(--border); }
-
-.body { display: flex; overflow: hidden; }
-
-/* ── Sidebar ── */
-aside {
-  width: 220px; min-width: 220px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 16px 14px;
-  display: flex; flex-direction: column; gap: 20px;
-}
-
-.filter-group label.group-label {
-  display: block; font-size: 10px; letter-spacing: .1em; color: var(--text-ter);
-  font-weight: 700; margin-bottom: 8px; text-transform: uppercase;
-}
-
-/* Tier pills */
-.tier-pills { display: flex; flex-direction: column; gap: 5px; }
-.tier-pill {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 5px;
-  cursor: pointer; user-select: none; transition: background .12s;
-  border: 1px solid transparent;
-}
-.tier-pill:hover { background: var(--surface-r); }
-.tier-pill.active { background: var(--surface-r); border-color: var(--border); }
-.tier-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.tier-pill .dot.T1  { background: var(--t1); }
-.tier-pill .dot.T2  { background: var(--t2); }
-.tier-pill .dot.T3  { background: var(--t3); }
-.tier-pill .dot.GC  { background: var(--gc); }
-.tier-pill span { font-size: 12px; color: var(--text-sec); }
-.tier-pill.active span { color: var(--text-pri); }
-
-/* Map selector */
-.map-list { display: flex; flex-direction: column; gap: 3px; }
-.map-item {
-  padding: 6px 10px; border-radius: 5px;
-  cursor: pointer; color: var(--text-sec); transition: all .1s;
-  border: 1px solid transparent;
-}
-.map-item:hover { background: var(--surface-r); color: var(--text-pri); }
-.map-item.active { background: var(--surface-r); border-color: var(--border); color: var(--text-pri); font-weight: 600; }
-
-/* Min sample slider */
-.slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.slider-row span { font-size: 11px; color: var(--text-sec); }
-input[type=range] {
-  -webkit-appearance: none; width: 100%; height: 3px;
-  background: var(--border); border-radius: 2px; outline: none;
-}
-input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
-  background: var(--accent); cursor: pointer;
-}
-
-/* DB stats pill */
-.db-stat { font-size: 10px; color: var(--text-ter); margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
-.db-stat strong { color: var(--text-sec); }
-
-/* ── Main content ── */
-main { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; }
-
-/* Tab bar */
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
-.tab {
-  padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--text-sec);
-  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
-  transition: color .12s, border-color .12s;
-}
-.tab:hover { color: var(--text-pri); }
-.tab.active { color: var(--text-pri); border-bottom-color: var(--accent); }
-
-/* Section */
-.section { display: none; flex-direction: column; gap: 16px; }
-.section.active { display: flex; }
-
-.section-header { display: flex; align-items: baseline; gap: 10px; }
-.section-header h2 { font-size: 13px; font-weight: 600; }
-.section-header .count { font-size: 11px; color: var(--text-ter); }
-
-/* ── Table ── */
-.tbl-wrap { overflow-x: auto; border-radius: 6px; border: 1px solid var(--border); }
-table { width: 100%; border-collapse: collapse; }
-thead tr { background: var(--surface-r); }
-th {
-  padding: 9px 12px; text-align: left;
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--text-ter); white-space: nowrap; cursor: pointer; user-select: none;
-}
-th:hover { color: var(--text-sec); }
-th.sorted { color: var(--accent); }
-th .sort-arrow { margin-left: 4px; opacity: .5; }
-th.sorted .sort-arrow { opacity: 1; }
-
-tbody tr { border-top: 1px solid var(--border); transition: background .08s; }
-tbody tr:hover { background: var(--surface-r); }
-td { padding: 9px 12px; color: var(--text-sec); white-space: nowrap; }
-td.pri { color: var(--text-pri); font-weight: 500; }
-
-/* Win rate bar cell */
-.winbar-cell { display: flex; align-items: center; gap: 8px; min-width: 120px; }
-.winbar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-.winbar-fill { height: 100%; border-radius: 2px; transition: width .3s; }
-.winpct { font-size: 12px; font-weight: 600; min-width: 38px; }
-
-/* Tier badge */
-.tier-badge {
-  display: inline-block; padding: 2px 6px; border-radius: 3px;
-  font-size: 10px; font-weight: 700; letter-spacing: .06em;
-}
-.tier-badge.T1 { background: rgba(240,180,41,.15); color: var(--t1); }
-.tier-badge.T2 { background: rgba(59,185,196,.15); color: var(--t2); }
-.tier-badge.T3 { background: rgba(154,160,168,.12); color: var(--t3); }
-.tier-badge.GC { background: rgba(155,102,216,.15); color: var(--gc); }
-
-/* Comp tag */
-.comp-tag { font-family: monospace; font-size: 11px; color: var(--text-pri); letter-spacing: .02em; }
-
-/* Agent icon */
-.agent-icon { width: 20px; height: 20px; border-radius: 3px; vertical-align: middle; margin-right: 5px; }
-
-/* Map badge */
-.map-badge { font-size: 11px; color: var(--text-sec); }
-
-/* Empty state */
-.empty { text-align: center; padding: 48px 0; color: var(--text-ter); font-size: 12px; }
-
-/* Loading spinner */
-.loading { text-align: center; padding: 48px 0; color: var(--text-ter); font-size: 11px; letter-spacing: .1em; }
-
-/* ── Meta cards (map section) ── */
-.meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.meta-card {
-  background: var(--surface-r); border: 1px solid var(--border); border-radius: 6px;
-  padding: 14px; display: flex; flex-direction: column; gap: 8px;
-}
-.meta-card .map-name { font-size: 12px; font-weight: 600; }
-.meta-card .sample  { font-size: 10px; color: var(--text-ter); }
-.meta-card .side-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
-.side-bar .a-side { background: var(--loss); }
-.side-bar .b-side { background: var(--win); }
-.meta-card .side-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-ter); }
-
+  html,body{margin:0;padding:0;background:#0B0C0E;height:100%}
+  *{box-sizing:border-box}
+  input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;width:100%}
+  input[type=range]::-webkit-slider-runnable-track{height:2px;background:#262A32}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;margin-top:-4px;border-radius:50%;background:#E8E9EA}
+  input[type=range]:hover::-webkit-slider-thumb{background:#5B8DEF}
+  ::selection{background:#5B8DEF33}
+  .row-hover:hover{background:#1B1E24}
+  .pill:hover{opacity:.8;cursor:pointer}
+  .map-item:hover{border-color:#262A32!important;cursor:pointer}
+  .tab-btn{cursor:pointer}
+  .tab-btn:hover{color:#E8E9EA!important}
+  .sort-hd{cursor:pointer}
+  .sort-hd:hover{color:#5B8DEF!important}
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-track{background:#0B0C0E}
+  ::-webkit-scrollbar-thumb{background:#262A32}
+  ::-webkit-scrollbar-thumb:hover{background:#3A3F47}
 </style>
 </head>
 <body>
-<div class="layout">
+<div style="height:100vh;display:flex;flex-direction:column;background:#0B0C0E;color:#E8E9EA;font-family:-apple-system,'Segoe UI',system-ui,sans-serif;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden">
 
-<header>
-  <span class="brand">COMPSTATS</span>
-  <div class="divider"></div>
-  <span id="db-summary" style="font-size:11px;color:var(--text-ter)">Loading…</span>
-</header>
-
-<div class="body">
-
-<!-- ── Sidebar ── -->
-<aside>
-  <div class="filter-group">
-    <label class="group-label">Tier</label>
-    <div class="tier-pills" id="tier-pills">
-      <div class="tier-pill active" data-tier="T1"><div class="dot T1"></div><span>T1 · VCT</span></div>
-      <div class="tier-pill active" data-tier="T2"><div class="dot T2"></div><span>T2 · Challengers</span></div>
-      <div class="tier-pill active" data-tier="T3"><div class="dot T3"></div><span>T3</span></div>
-      <div class="tier-pill active" data-tier="GC"><div class="dot GC"></div><span>Game Changers</span></div>
+  <!-- Header -->
+  <div style="height:44px;flex:none;background:#0B0C0E;border-bottom:1px solid #262A32;display:flex;align-items:center;gap:20px;padding:0 14px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:9px;height:9px;background:#5B8DEF"></div>
+      <span style="font-size:13px;font-weight:650;letter-spacing:0.06em">ANTI-STRAT</span>
+      <span style="font-size:10px;color:#62696D;letter-spacing:0.08em;text-transform:uppercase;border-left:1px solid #262A32;padding-left:8px;margin-left:2px">VALORANT · pro tier</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-left:8px">
+      <span style="font-size:10px;color:#62696D;letter-spacing:0.08em">MATCHES</span>
+      <span id="hdr-matches" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
+      <span style="font-size:10px;color:#62696D;letter-spacing:0.08em;margin-left:6px">MAP RESULTS</span>
+      <span id="hdr-maps" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:6px;background:#131519;border:1px solid #262A32;padding:3px 8px;width:240px">
+      <span style="color:#62696D;font-size:12px">&#x2315;</span>
+      <input id="search" placeholder="Filter archetype, agent, map&hellip;" style="flex:1;background:transparent;border:none;outline:none;color:#E8E9EA;font-family:inherit;font-size:12px"/>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9AA0A8">
+      <span id="hdr-dot" style="width:5px;height:5px;border-radius:50%;background:#62696D"></span>
+      <span id="hdr-status">loading&hellip;</span>
     </div>
   </div>
 
-  <div class="filter-group">
-    <label class="group-label">Map</label>
-    <div class="map-list" id="map-list">
-      <div class="map-item active" data-map="">All maps</div>
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- Sidebar -->
+    <div style="width:220px;flex:none;background:#131519;border-right:1px solid #262A32;overflow-y:auto;padding-bottom:20px">
+
+      <div style="padding:12px 12px 10px">
+        <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:9px">Tier</div>
+        <div id="tier-pills" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+        <div id="tier-summary" style="font-size:11px;color:#62696D;margin-top:8px;font-family:ui-monospace,'SF Mono',Menlo,monospace"></div>
+      </div>
+
+      <div style="border-top:1px solid #262A32;padding:12px 12px 10px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px">
+          <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase">Map</div>
+          <div id="map-all-btn" style="font-size:10px;letter-spacing:0.06em;color:#9AA0A8;cursor:pointer;text-transform:uppercase">All</div>
+        </div>
+        <div id="map-list" style="display:flex;flex-direction:column;gap:1px"></div>
+      </div>
+
+      <div style="border-top:1px solid #262A32;padding:12px">
+        <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:12px">Sample thresholds</div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;color:#9AA0A8">Min matches</span>
+          <span id="lbl-min-matches" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">10</span>
+        </div>
+        <input id="sl-min-matches" type="range" min="1" max="200" step="1" value="10" style="margin-bottom:16px"/>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;color:#9AA0A8">Min pick rate</span>
+          <span id="lbl-min-pick" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">1%</span>
+        </div>
+        <input id="sl-min-pick" type="range" min="0" max="30" step="1" value="1"/>
+      </div>
+
+      <div style="border-top:1px solid #262A32;padding:12px">
+        <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:9px">Sample</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#9AA0A8;padding:3px 0"><span>Map results</span><span id="samp-maps" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#E8E9EA">—</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#9AA0A8;padding:3px 0"><span>Rows in view</span><span id="samp-rows" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#E8E9EA">—</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#9AA0A8;padding:3px 0"><span>Filtered out</span><span id="samp-hidden" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#62696D">—</span></div>
+      </div>
+    </div>
+
+    <!-- Main -->
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:#0B0C0E">
+
+      <!-- Tabs -->
+      <div style="flex:none;height:38px;border-bottom:1px solid #262A32;display:flex;align-items:stretch;padding:0 14px;gap:2px">
+        <div id="tab-comps" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Compositions</div>
+        <div id="tab-agents" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Agents</div>
+        <div id="tab-maps" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Map Meta</div>
+        <div style="flex:1"></div>
+        <div id="scope-label" style="display:flex;align-items:center;font-size:11px;color:#62696D;font-family:ui-monospace,'SF Mono',Menlo,monospace"></div>
+      </div>
+
+      <!-- KPI bar -->
+      <div id="kpi-bar" style="flex:none;display:flex;align-items:center;border-bottom:1px solid #262A32;background:#0B0C0E"></div>
+
+      <!-- Table -->
+      <div id="table-area" style="flex:1;overflow:auto;min-height:0"></div>
+
+      <!-- Status bar -->
+      <div style="flex:none;height:26px;border-top:1px solid #262A32;background:#0B0C0E;display:flex;align-items:center;gap:18px;padding:0 14px;font-size:11px;color:#62696D">
+        <span id="status-line" style="font-family:ui-monospace,'SF Mono',Menlo,monospace"></span>
+        <div style="flex:1"></div>
+        <span id="sort-label"></span>
+        <span>arch key: <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">s</span>entinel &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">d</span>uelist &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">i</span>nitiator &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">c</span>ontroller</span>
+      </div>
     </div>
   </div>
-
-  <div class="filter-group">
-    <label class="group-label">Min sample</label>
-    <div class="slider-row">
-      <span>Comps</span><span id="min-comp-val">15</span>
-    </div>
-    <input type="range" id="min-comp" min="5" max="80" value="15">
-    <br><br>
-    <div class="slider-row">
-      <span>Agents</span><span id="min-agent-val">10</span>
-    </div>
-    <input type="range" id="min-agent" min="3" max="60" value="10">
-  </div>
-
-  <div class="db-stat" id="db-stat">—</div>
-</aside>
-
-<!-- ── Main ── -->
-<main>
-  <div class="tabs">
-    <div class="tab active" data-tab="comps">Compositions</div>
-    <div class="tab" data-tab="agents">Agents</div>
-    <div class="tab" data-tab="maps">Map Meta</div>
-  </div>
-
-  <!-- Comps -->
-  <div class="section active" id="section-comps">
-    <div class="section-header">
-      <h2>Composition win rates</h2>
-      <span class="count" id="comp-count"></span>
-    </div>
-    <div class="tbl-wrap">
-      <table id="comp-table">
-        <thead>
-          <tr>
-            <th data-col="comp" class="sorted">Archetype <span class="sort-arrow">↓</span></th>
-            <th data-col="map">Map</th>
-            <th data-col="win_pct">Win % <span class="sort-arrow">↓</span></th>
-            <th data-col="total">Sample</th>
-          </tr>
-        </thead>
-        <tbody id="comp-tbody"><tr><td colspan="4" class="loading">LOADING</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Agents -->
-  <div class="section" id="section-agents">
-    <div class="section-header">
-      <h2>Agent pick &amp; win rates</h2>
-      <span class="count" id="agent-count"></span>
-    </div>
-    <div class="tbl-wrap">
-      <table id="agent-table">
-        <thead>
-          <tr>
-            <th data-col="agent">Agent</th>
-            <th data-col="map">Map</th>
-            <th data-col="picks" class="sorted">Picks <span class="sort-arrow">↓</span></th>
-            <th data-col="win_pct">Win % <span class="sort-arrow">↓</span></th>
-          </tr>
-        </thead>
-        <tbody id="agent-tbody"><tr><td colspan="4" class="loading">LOADING</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Maps -->
-  <div class="section" id="section-maps">
-    <div class="section-header">
-      <h2>Map play counts</h2>
-      <span class="count" id="map-count"></span>
-    </div>
-    <div class="meta-grid" id="meta-grid"></div>
-  </div>
-
-</main>
-</div>
 </div>
 
 <script>
-// ── State ────────────────────────────────────────────────────────────────────
-const state = {
-  tiers: new Set(['T1','T2','T3','GC']),
-  map: '',
-  minComp: 15,
-  minAgent: 10,
-  activeTab: 'comps',
-  compSort: { col: 'win_pct', dir: -1 },
-  agentSort: { col: 'picks', dir: -1 },
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const TIERS = [
+  { key:'T1', label:'T1', dot:'#5B8DEF' },
+  { key:'T2', label:'T2', dot:'#3BB9C4' },
+  { key:'T3', label:'T3', dot:'#9AA0A8' },
+  { key:'GC', label:'GC', dot:'#9B66D8' }
+];
+
+const ROLE_COLOR = {
+  Controller:'#9B66D8', Duelist:'#E5484D',
+  Initiator:'#3BB9C4',  Sentinel:'#5B8DEF'
 };
 
-// ── Fetch helpers ─────────────────────────────────────────────────────────────
-async function api(path) {
-  const r = await fetch(path);
-  return r.json();
+const AGENT_ROLE = {
+  jett:'Duelist',raze:'Duelist',phoenix:'Duelist',neon:'Duelist',
+  reyna:'Duelist',yoru:'Duelist',iso:'Duelist',waylay:'Duelist',
+  sova:'Initiator',breach:'Initiator',skye:'Initiator',fade:'Initiator',
+  kayo:'Initiator',gekko:'Initiator',tejo:'Initiator',
+  viper:'Controller',omen:'Controller',brimstone:'Controller',
+  astra:'Controller',harbor:'Controller',clove:'Controller',
+  sage:'Sentinel',cypher:'Sentinel',killjoy:'Sentinel',
+  chamber:'Sentinel',deadlock:'Sentinel',vyse:'Sentinel'
+};
+
+const AGENT_DISPLAY = {
+  jett:'Jett',raze:'Raze',phoenix:'Phoenix',neon:'Neon',reyna:'Reyna',
+  yoru:'Yoru',iso:'Iso',waylay:'Waylay',
+  sova:'Sova',breach:'Breach',skye:'Skye',fade:'Fade',kayo:'KAY/O',
+  gekko:'Gekko',tejo:'Tejo',
+  viper:'Viper',omen:'Omen',brimstone:'Brimstone',astra:'Astra',
+  harbor:'Harbor',clove:'Clove',
+  sage:'Sage',cypher:'Cypher',killjoy:'Killjoy',chamber:'Chamber',
+  deadlock:'Deadlock',vyse:'Vyse'
+};
+
+// ── State ────────────────────────────────────────────────────────────────────
+
+const S = {
+  tab: 'comps',
+  tiers: { T1:true, T2:true, T3:true, GC:true },
+  map: null,
+  minMatches: 10,
+  minPick: 1,
+  query: '',
+  sort: {
+    comps:  { key:'win_pct', dir:-1 },
+    agents: { key:'pick',    dir:-1 },
+    maps:   { key:'matches', dir:-1 }
+  },
+  rawComps:  [],
+  rawAgents: [],
+  rawMaps:   [],
+  mapList:   [],
+  totalMatches: 0,
+  totalMapResults: 0
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const num    = n => Math.round(n).toLocaleString('en-US');
+const wrColor = v => v >= 52 ? '#46A758' : v >= 47.5 ? '#5B8DEF' : '#E5484D';
+const barW    = v => Math.max(2, Math.min(100, (v - 35) / 30 * 100)).toFixed(1) + '%';
+const activeTiers = () => TIERS.filter(t => S.tiers[t.key]);
+const tierParam   = () => activeTiers().map(t => t.key).join(',');
+
+function expandArch(arch) {
+  const map = { s:'Sentinel', d:'Duelist', i:'Initiator', c:'Controller' };
+  const slots = [];
+  for (const m of (arch.match(/(\d+)([sdic])/g) || [])) {
+    const [, n, r] = m.match(/(\d+)([sdic])/);
+    for (let j = 0; j < +n; j++) slots.push(map[r]);
+  }
+  while (slots.length < 5) slots.push(null);
+  return slots.slice(0, 5);
 }
 
-function tiersParam() { return [...state.tiers].join(','); }
+function archSquares(arch) {
+  return expandArch(arch).map(role =>
+    `<span style="width:4px;height:14px;background:${role ? ROLE_COLOR[role] : '#2A2F38'};flex:none;display:inline-block"></span>`
+  ).join('');
+}
+
+// ── Aggregation ──────────────────────────────────────────────────────────────
+
+function aggComps() {
+  const agg = {};
+  for (const r of S.rawComps) {
+    if (!agg[r.comp]) agg[r.comp] = { comp:r.comp, wins:0, total:0 };
+    agg[r.comp].wins  += r.wins;
+    agg[r.comp].total += r.total;
+  }
+  return Object.values(agg).map(c => ({
+    comp:    c.comp,
+    wins:    c.wins,
+    total:   c.total,
+    win_pct: c.total ? c.wins / c.total * 100 : 0
+  }));
+}
+
+function aggAgents() {
+  const agg = {};
+  for (const r of S.rawAgents) {
+    if (!agg[r.agent]) agg[r.agent] = { agent:r.agent, picks:0, wins:0 };
+    agg[r.agent].picks += r.picks;
+    agg[r.agent].wins  += r.wins;
+  }
+  const totalPicks = Object.values(agg).reduce((s, a) => s + a.picks, 0);
+  return Object.values(agg).map(a => ({
+    agent:   a.agent,
+    name:    AGENT_DISPLAY[a.agent] || a.agent,
+    role:    AGENT_ROLE[a.agent]    || 'Unknown',
+    picks:   a.picks,
+    wins:    a.wins,
+    win_pct: a.picks ? a.wins / a.picks * 100 : 0,
+    // pick% = plays per map (totalPicks = total_maps * 10 slots)
+    pick:    totalPicks ? a.picks / (totalPicks / 10) * 100 : 0
+  }));
+}
+
+function topArchForMap(mapName) {
+  const forMap = S.rawComps.filter(c => c.map === mapName);
+  if (!forMap.length) return null;
+  return forMap.reduce((best, c) => c.total > best.total ? c : best);
+}
+
+// ── API Fetch ────────────────────────────────────────────────────────────────
+
+async function fetchData() {
+  const tiers = encodeURIComponent(tierParam());
+  const map   = encodeURIComponent(S.map || '');
+  setStatus('dim', 'loading…');
+
+  try {
+    const [cRes, aRes, mRes, sRes] = await Promise.all([
+      fetch(`/api/comps?tiers=${tiers}&map=${map}&min_sample=1`),
+      fetch(`/api/agents?tiers=${tiers}&map=${map}&min_sample=1`),
+      fetch(`/api/maps/meta?tiers=${tiers}`),
+      fetch('/api/stats')
+    ]);
+
+    S.rawComps  = await cRes.json();
+    S.rawAgents = await aRes.json();
+    S.rawMaps   = await mRes.json();
+    const stats = await sRes.json();
+
+    S.totalMatches    = stats.matches     || 0;
+    S.totalMapResults = stats.map_results || 0;
+    S.mapList = [...S.rawMaps].sort((a, b) => b.total - a.total);
+
+    document.getElementById('hdr-matches').textContent = num(S.totalMatches);
+    document.getElementById('hdr-maps').textContent    = num(S.totalMapResults);
+    setStatus('live', num(S.totalMatches) + ' matches');
+
+    render();
+  } catch(e) {
+    setStatus('err', 'connection error');
+    console.error(e);
+  }
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function setStatus(kind, text) {
+  document.getElementById('hdr-dot').style.background =
+    kind === 'live' ? '#46A758' : kind === 'err' ? '#E5484D' : '#62696D';
+  document.getElementById('hdr-status').textContent = text;
+}
+
+function render() {
+  renderSidebar();
+  renderTabs();
+  renderMain();
+}
+
+function renderSidebar() {
+  // Tier pills
+  const pills = document.getElementById('tier-pills');
+  pills.innerHTML = '';
+  TIERS.forEach(t => {
+    const on = S.tiers[t.key];
+    const el = document.createElement('div');
+    el.className = 'pill';
+    el.style.cssText = `display:flex;align-items:center;gap:6px;padding:4px 9px;font-size:12px;border:1px solid ${on?'#3A3F47':'#1E2127'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#62696D'}`;
+    el.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${on?t.dot:'#3A3F47'}"></span>${t.label}`;
+    el.onclick = () => { S.tiers[t.key] = !S.tiers[t.key]; fetchData(); };
+    pills.appendChild(el);
+  });
+  const active = activeTiers();
+  document.getElementById('tier-summary').textContent = active.length
+    ? active.map(t => t.key).join('+') + ' · ' + num(S.totalMatches) + ' matches'
+    : 'no tiers selected';
+
+  // Map list
+  const list = document.getElementById('map-list');
+  list.innerHTML = '';
+  S.mapList.forEach(m => {
+    const on = S.map === m.map;
+    const el = document.createElement('div');
+    el.className = 'map-item';
+    el.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border:1px solid ${on?'#3A3F47':'transparent'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#9AA0A8'}`;
+    el.innerHTML = `<span style="font-size:12px">${m.map}</span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${num(m.total)}</span>`;
+    el.onclick = () => { S.map = on ? null : m.map; fetchData(); };
+    list.appendChild(el);
+  });
+}
+
+function renderTabs() {
+  ['comps','agents','maps'].forEach(k => {
+    const el = document.getElementById('tab-' + k);
+    const active = S.tab === k;
+    el.style.color     = active ? '#E8E9EA' : '#9AA0A8';
+    el.style.boxShadow = active ? 'inset 0 -2px 0 #5B8DEF' : 'none';
+  });
+  document.getElementById('scope-label').textContent =
+    (S.map || 'all maps') + ' · ' + (activeTiers().map(t => t.key).join('/') || 'none');
+}
+
+function renderMain() {
+  renderKpis();
+  renderTable();
+  renderStatusBar();
+}
+
+// ── KPI bar ──────────────────────────────────────────────────────────────────
+
+function renderKpis() {
+  const bar = document.getElementById('kpi-bar');
+  bar.innerHTML = '';
+  buildKpis().forEach(k => {
+    const el = document.createElement('div');
+    el.style.cssText = 'padding:10px 16px;border-right:1px solid #262A32;min-width:160px';
+    el.innerHTML = `
+      <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:4px">${k.label}</div>
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:17px;color:#E8E9EA">${k.value}</span>
+        <span style="font-size:11px;color:${k.subColor||'#62696D'}">${k.sub||''}</span>
+      </div>`;
+    bar.appendChild(el);
+  });
+}
+
+function buildKpis() {
+  if (S.tab === 'comps') {
+    const { rows, total } = filteredComps();
+    const avgWr = rows.length ? rows.reduce((s,r)=>s+r.win_pct,0)/rows.length : null;
+    const top   = rows.length ? [...rows].sort((a,b)=>b.win_pct-a.win_pct)[0] : null;
+    return [
+      { label:'Archetypes in view', value:String(rows.length), sub:'of '+total },
+      { label:'Avg win rate',
+        value: avgWr ? avgWr.toFixed(1)+'%' : '—',
+        sub:   avgWr ? (avgWr>=50?'above even':'below even') : '',
+        subColor: avgWr ? (avgWr>=50?'#46A758':'#E5484D') : '#62696D' },
+      { label:'Top archetype WR', value:top?top.win_pct.toFixed(1)+'%':'—', sub:top?top.comp:'', subColor:'#9AA0A8' },
+      { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
+    ];
+  }
+  if (S.tab === 'agents') {
+    const { rows, total } = filteredAgents();
+    const avgWr  = rows.length ? rows.reduce((s,r)=>s+r.win_pct,0)/rows.length : null;
+    const topPk  = rows.length ? [...rows].sort((a,b)=>b.pick-a.pick)[0] : null;
+    return [
+      { label:'Agents in view', value:String(rows.length), sub:'of '+total },
+      { label:'Avg win rate',
+        value: avgWr ? avgWr.toFixed(1)+'%' : '—',
+        sub:   avgWr ? (avgWr>=50?'above even':'below even') : '',
+        subColor: avgWr ? (avgWr>=50?'#46A758':'#E5484D') : '#62696D' },
+      { label:'Highest pick%', value:topPk?topPk.pick.toFixed(1)+'%':'—', sub:topPk?topPk.name:'', subColor:'#9AA0A8' },
+      { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
+    ];
+  }
+  // maps tab
+  const { rows } = filteredMaps();
+  const top = rows.length ? [...rows].sort((a,b)=>b.matches-a.matches)[0] : null;
+  return [
+    { label:'Maps in pool', value:String(rows.length), sub:S.map?'filtered':'all' },
+    { label:'Balanced maps', value:String(rows.filter(m=>Math.abs(m.a_wr-50)<=2).length), sub:'within ±2% WR' },
+    { label:'Most played', value:top?num(top.matches):'—', sub:top?top.name:'', subColor:'#9AA0A8' },
+    { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
+  ];
+}
+
+// ── Filtering & sorting ───────────────────────────────────────────────────────
+
+function filteredComps() {
+  const all = aggComps();
+  const q   = S.query.trim().toLowerCase();
+  const rows = all.filter(r => r.total >= S.minMatches && (!q || r.comp.includes(q)));
+  return { rows: sortRows(rows, 'comps'), total: all.length };
+}
+
+function filteredAgents() {
+  const all = aggAgents();
+  const q   = S.query.trim().toLowerCase();
+  const rows = all.filter(a =>
+    a.pick >= S.minPick &&
+    (!q || (a.name + ' ' + a.role).toLowerCase().includes(q))
+  );
+  return { rows: sortRows(rows, 'agents'), total: all.length };
+}
+
+function filteredMaps() {
+  const q   = S.query.trim().toLowerCase();
+  const all = S.rawMaps.map(m => ({
+    name:    m.map,
+    matches: m.total,
+    a_wr:    m.total ? m.a_wins / m.total * 100 : 50,
+    b_wr:    m.total ? m.b_wins / m.total * 100 : 50
+  }));
+  const rows = all.filter(m => !q || m.name.toLowerCase().includes(q));
+  return { rows: sortRows(rows, 'maps'), total: all.length };
+}
+
+function sortRows(rows, tab) {
+  const { key, dir } = S.sort[tab];
+  return rows.slice().sort((a, b) => {
+    const x = a[key], y = b[key];
+    return typeof x === 'string' ? x.localeCompare(y) * dir : (x - y) * dir;
+  });
+}
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+
+function renderTable() {
+  const area = document.getElementById('table-area');
+  let el, rows, total;
+
+  if (S.tab === 'comps') {
+    ({ rows, total } = filteredComps());
+    el = buildCompsTable(rows);
+    setSample(rows.length, total);
+  } else if (S.tab === 'agents') {
+    ({ rows, total } = filteredAgents());
+    el = buildAgentsTable(rows);
+    setSample(rows.length, total);
+  } else {
+    ({ rows, total } = filteredMaps());
+    el = buildMapsTable(rows);
+    setSample(rows.length, total);
+  }
+  area.replaceChildren(el);
+}
+
+function setSample(visible, total) {
+  document.getElementById('samp-maps').textContent   = num(S.totalMapResults);
+  document.getElementById('samp-rows').textContent   = String(visible);
+  document.getElementById('samp-hidden').textContent = String(total - visible);
+}
+
+function hdrRow(cols, tab) {
+  const { key: sk, dir: sd } = S.sort[tab];
+  const el = document.createElement('div');
+  el.style.cssText = `display:grid;grid-template-columns:${cols.map(c=>c.w).join(' ')};align-items:center;background:#1B1E24;border-bottom:1px solid #262A32;position:sticky;top:0;z-index:2;height:30px;padding:0 14px`;
+  cols.forEach(c => {
+    const cell = document.createElement('div');
+    const align = c.right ? 'text-align:right;' : c.pl ? 'padding-left:18px;' : '';
+    cell.style.cssText = `font-size:10px;letter-spacing:0.1em;text-transform:uppercase;${align}${c.sort ? 'cursor:pointer;color:#9AA0A8;' : 'color:#62696D;'}`;
+    if (c.sort) cell.className = 'sort-hd';
+    const arrow = c.sort && sk === c.sort ? (sd === -1 ? '▾' : '▴') : '';
+    cell.innerHTML = c.label + (arrow ? ` <span style="color:#5B8DEF">${arrow}</span>` : '');
+    if (c.sort) cell.onclick = () => {
+      const cur = S.sort[tab];
+      S.sort[tab] = cur.key === c.sort
+        ? { key:c.sort, dir:-cur.dir }
+        : { key:c.sort, dir:c.asc ? 1 : -1 };
+      renderMain();
+    };
+    el.appendChild(cell);
+  });
+  return el;
+}
+
+function emptyRow(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = 'padding:40px 16px;color:#62696D;font-size:12px';
+  el.textContent = msg;
+  return el;
+}
+
+// ── Comps table ───────────────────────────────────────────────────────────────
+
+function buildCompsTable(rows) {
+  const COLS = [
+    { w:'44px',               label:'#' },
+    { w:'minmax(220px,1fr)',   label:'Archetype', sort:'comp',    asc:true },
+    { w:'90px',               label:'Matches',   sort:'total',   right:true },
+    { w:'180px',              label:'Win Rate',  sort:'win_pct', pl:true }
+  ];
+  const wrap = document.createElement('div');
+  wrap.appendChild(hdrRow(COLS, 'comps'));
+  if (!rows.length) {
+    wrap.appendChild(emptyRow('No archetypes meet current thresholds. Lower min matches or enable more tiers.'));
+    return wrap;
+  }
+  rows.forEach((r, i) => {
+    const tierColor = r.win_pct >= 53 ? '#5B8DEF' : r.win_pct >= 50 ? '#3BB9C4' : '#262A32';
+    const el = document.createElement('div');
+    el.className = 'row-hover';
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px`;
+    el.innerHTML = `
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
+      <div style="display:flex;align-items:center;gap:6px;overflow:hidden">
+        <span style="width:3px;height:14px;background:${tierColor};flex:none"></span>
+        <div style="display:flex;gap:2px;flex:none">${archSquares(r.comp)}</div>
+        <span style="font-size:12px;color:#E8E9EA;font-family:ui-monospace,'SF Mono',Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.comp}</span>
+      </div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.total)}</div>
+      <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
+        <div style="width:84px;height:4px;background:#262A32;flex:none">
+          <div style="height:4px;width:${barW(r.win_pct)};background:${wrColor(r.win_pct)}"></div>
+        </div>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.win_pct.toFixed(1)}%</span>
+      </div>`;
+    wrap.appendChild(el);
+  });
+  return wrap;
+}
+
+// ── Agents table ──────────────────────────────────────────────────────────────
+
+function buildAgentsTable(rows) {
+  const COLS = [
+    { w:'44px',               label:'#' },
+    { w:'minmax(140px,1fr)',  label:'Agent',    sort:'name',    asc:true },
+    { w:'120px',              label:'Role',     sort:'role',    asc:true },
+    { w:'90px',               label:'Pick %',   sort:'pick',    right:true },
+    { w:'180px',              label:'Win Rate', sort:'win_pct', pl:true }
+  ];
+  const wrap = document.createElement('div');
+  wrap.appendChild(hdrRow(COLS, 'agents'));
+  if (!rows.length) {
+    wrap.appendChild(emptyRow('No agents meet current thresholds.'));
+    return wrap;
+  }
+  rows.forEach((r, i) => {
+    const rc = ROLE_COLOR[r.role] || '#62696D';
+    const el = document.createElement('div');
+    el.className = 'row-hover';
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px`;
+    el.innerHTML = `
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
+      <div style="font-size:13px;color:#E8E9EA">${r.name}</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:#9AA0A8">
+        <span style="width:6px;height:6px;background:${rc}"></span>${r.role}
+      </div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${r.pick.toFixed(1)}%</div>
+      <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
+        <div style="width:84px;height:4px;background:#262A32;flex:none">
+          <div style="height:4px;width:${barW(r.win_pct)};background:${wrColor(r.win_pct)}"></div>
+        </div>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.win_pct.toFixed(1)}%</span>
+      </div>`;
+    wrap.appendChild(el);
+  });
+  return wrap;
+}
+
+// ── Maps table ────────────────────────────────────────────────────────────────
+
+function buildMapsTable(rows) {
+  const COLS = [
+    { w:'44px',               label:'#' },
+    { w:'minmax(140px,0.8fr)',label:'Map',     sort:'name',    asc:true },
+    { w:'100px',              label:'Matches', sort:'matches', right:true },
+    { w:'180px',              label:'Side A WR', sort:'a_wr', pl:true },
+    { w:'minmax(180px,1fr)',  label:'Top Archetype' }
+  ];
+  const wrap = document.createElement('div');
+  wrap.appendChild(hdrRow(COLS, 'maps'));
+  if (!rows.length) {
+    wrap.appendChild(emptyRow('No map data. Scrape some matches first.'));
+    return wrap;
+  }
+  rows.forEach((r, i) => {
+    const top      = topArchForMap(r.name);
+    const topLabel = top ? top.comp : '—';
+    const el = document.createElement('div');
+    el.className = 'row-hover';
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px;cursor:pointer`;
+    el.innerHTML = `
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
+      <div style="font-size:13px;color:#E8E9EA">${r.name}</div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.matches)}</div>
+      <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
+        <div style="width:84px;height:4px;background:#262A32;flex:none">
+          <div style="height:4px;width:${barW(r.a_wr)};background:${wrColor(r.a_wr)}"></div>
+        </div>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.a_wr.toFixed(1)}%</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;overflow:hidden;padding-left:6px">
+        ${top ? '<div style="display:flex;gap:2px;flex:none">' + archSquares(top.comp) + '</div>' : ''}
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#9AA0A8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${topLabel}</span>
+      </div>`;
+    el.onclick = () => { S.map = S.map === r.name ? null : r.name; fetchData(); };
+    wrap.appendChild(el);
+  });
+  return wrap;
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+
+function renderStatusBar() {
+  const { key, dir } = S.sort[S.tab];
+  document.getElementById('status-line').textContent =
+    `antistrat://${S.tab}?tier=${tierParam()||'none'}&map=${S.map||'all'}&min=${S.minMatches}`;
+  document.getElementById('sort-label').innerHTML =
+    `sort: <span style="color:#9AA0A8;font-family:ui-monospace,'SF Mono',Menlo,monospace">${key} ${dir===-1?'desc':'asc'}</span>`;
+}
+
+// ── Events ───────────────────────────────────────────────────────────────────
+
+['comps','agents','maps'].forEach(k => {
+  document.getElementById('tab-'+k).onclick = () => {
+    S.tab = k; renderTabs(); renderMain();
+  };
+});
+
+document.getElementById('map-all-btn').onclick = () => { S.map = null; fetchData(); };
+
+let _st;
+document.getElementById('search').oninput = e => {
+  clearTimeout(_st);
+  _st = setTimeout(() => { S.query = e.target.value; renderMain(); }, 120);
+};
+
+document.getElementById('sl-min-matches').oninput = e => {
+  S.minMatches = +e.target.value;
+  document.getElementById('lbl-min-matches').textContent = e.target.value;
+  renderMain();
+};
+
+document.getElementById('sl-min-pick').oninput = e => {
+  S.minPick = +e.target.value;
+  document.getElementById('lbl-min-pick').textContent = e.target.value + '%';
+  renderMain();
+};
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-async function init() {
-  await loadStats();
-  await loadMapList();
-  await refresh();
-}
 
-async function loadStats() {
-  const s = await api('/api/stats');
-  document.getElementById('db-summary').textContent =
-    `${s.matches.toLocaleString()} matches · ${s.map_results.toLocaleString()} map results`;
-
-  const tierParts = s.tiers.map(t => `${t.n} ${t.tier}`).join(' · ');
-  document.getElementById('db-stat').innerHTML =
-    `<strong>${tierParts}</strong>`;
-}
-
-async function loadMapList() {
-  const maps = await api('/api/maps/list?tiers=' + tiersParam());
-  const list = document.getElementById('map-list');
-  list.innerHTML = '<div class="map-item active" data-map="">All maps</div>' +
-    maps.map(m => `<div class="map-item" data-map="${m}">${m}</div>`).join('');
-  list.querySelectorAll('.map-item').forEach(el => {
-    el.addEventListener('click', () => {
-      list.querySelectorAll('.map-item').forEach(x => x.classList.remove('active'));
-      el.classList.add('active');
-      state.map = el.dataset.map;
-      refresh();
-    });
-  });
-  // restore active
-  list.querySelectorAll('.map-item').forEach(el => {
-    if (el.dataset.map === state.map) el.classList.add('active');
-  });
-}
-
-async function refresh() {
-  if (state.activeTab === 'comps')  await loadComps();
-  if (state.activeTab === 'agents') await loadAgents();
-  if (state.activeTab === 'maps')   await loadMaps();
-}
-
-// ── Compositions ─────────────────────────────────────────────────────────────
-let compData = [];
-
-async function loadComps() {
-  const tbody = document.getElementById('comp-tbody');
-  tbody.innerHTML = '<tr><td colspan="4" class="loading">LOADING</td></tr>';
-  const url = `/api/comps?map=${state.map}&tiers=${tiersParam()}&min_sample=${state.minComp}`;
-  compData = await api(url);
-  renderComps();
-}
-
-function renderComps() {
-  const { col, dir } = state.compSort;
-  const sorted = [...compData].sort((a, b) => dir * (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0));
-
-  document.getElementById('comp-count').textContent = `${sorted.length} rows`;
-
-  const tbody = document.getElementById('comp-tbody');
-  if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No data — scrape more events first.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = sorted.map(r => {
-    const pct = r.win_pct;
-    const clr = pct >= 55 ? 'var(--win)' : pct <= 45 ? 'var(--loss)' : 'var(--accent)';
-    const mapCell = r.map && !state.map ? `<span class="map-badge">${r.map}</span>` : '—';
-    return `<tr>
-      <td class="pri"><span class="comp-tag">${r.comp}</span></td>
-      <td>${state.map ? '—' : (r.map ? `<span class="map-badge">${r.map}</span>` : '—')}</td>
-      <td>
-        <div class="winbar-cell">
-          <div class="winbar"><div class="winbar-fill" style="width:${pct}%;background:${clr}"></div></div>
-          <span class="winpct" style="color:${clr}">${pct}%</span>
-        </div>
-      </td>
-      <td>${r.total}</td>
-    </tr>`;
-  }).join('');
-
-  // Sort headers
-  document.querySelectorAll('#comp-table th').forEach(th => {
-    th.classList.toggle('sorted', th.dataset.col === col);
-  });
-}
-
-// ── Agents ────────────────────────────────────────────────────────────────────
-let agentData = [];
-
-async function loadAgents() {
-  const tbody = document.getElementById('agent-tbody');
-  tbody.innerHTML = '<tr><td colspan="4" class="loading">LOADING</td></tr>';
-  const url = `/api/agents?map=${state.map}&tiers=${tiersParam()}&min_sample=${state.minAgent}`;
-  agentData = await api(url);
-  renderAgents();
-}
-
-function renderAgents() {
-  const { col, dir } = state.agentSort;
-  const sorted = [...agentData].sort((a, b) => dir * (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0));
-
-  document.getElementById('agent-count').textContent = `${sorted.length} rows`;
-
-  const tbody = document.getElementById('agent-tbody');
-  if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No data — scrape more events first.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = sorted.map(r => {
-    const pct = r.win_pct;
-    const clr = pct >= 55 ? 'var(--win)' : pct <= 45 ? 'var(--loss)' : 'var(--accent)';
-    const iconUrl = `https://www.vlr.gg/img/vlr/game/agents/${r.agent}.png`;
-    return `<tr>
-      <td class="pri">
-        <img class="agent-icon" src="${iconUrl}" onerror="this.style.display='none'">
-        ${r.agent}
-      </td>
-      <td>${r.map ? `<span class="map-badge">${r.map}</span>` : '—'}</td>
-      <td>${r.picks}</td>
-      <td>
-        <div class="winbar-cell">
-          <div class="winbar"><div class="winbar-fill" style="width:${pct}%;background:${clr}"></div></div>
-          <span class="winpct" style="color:${clr}">${pct}%</span>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-
-  document.querySelectorAll('#agent-table th').forEach(th => {
-    th.classList.toggle('sorted', th.dataset.col === col);
-  });
-}
-
-// ── Maps meta ─────────────────────────────────────────────────────────────────
-async function loadMaps() {
-  const data = await api(`/api/maps/meta?tiers=${tiersParam()}`);
-  document.getElementById('map-count').textContent = `${data.length} maps`;
-  const grid = document.getElementById('meta-grid');
-  if (!data.length) { grid.innerHTML = '<div class="empty">No data yet.</div>'; return; }
-  grid.innerHTML = data.map(r => {
-    const aPct = Math.round(r.a_wins / r.total * 100);
-    return `<div class="meta-card">
-      <div class="map-name">${r.map}</div>
-      <div class="sample">${r.total} maps played</div>
-      <div class="side-bar">
-        <div class="a-side" style="width:${aPct}%"></div>
-        <div class="b-side" style="width:${100-aPct}%"></div>
-      </div>
-      <div class="side-labels"><span>Side A ${aPct}%</span><span>${100-aPct}% Side B</span></div>
-    </div>`;
-  }).join('');
-}
-
-// ── Event wiring ──────────────────────────────────────────────────────────────
-// Tier pills
-document.getElementById('tier-pills').addEventListener('click', e => {
-  const pill = e.target.closest('.tier-pill');
-  if (!pill) return;
-  const t = pill.dataset.tier;
-  if (state.tiers.has(t)) { state.tiers.delete(t); pill.classList.remove('active'); }
-  else { state.tiers.add(t); pill.classList.add('active'); }
-  loadMapList();
-  refresh();
-});
-
-// Tabs
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    tab.classList.add('active');
-    state.activeTab = tab.dataset.tab;
-    document.getElementById(`section-${state.activeTab}`).classList.add('active');
-    refresh();
-  });
-});
-
-// Sliders
-document.getElementById('min-comp').addEventListener('input', e => {
-  state.minComp = +e.target.value;
-  document.getElementById('min-comp-val').textContent = e.target.value;
-  if (state.activeTab === 'comps') loadComps();
-});
-document.getElementById('min-agent').addEventListener('input', e => {
-  state.minAgent = +e.target.value;
-  document.getElementById('min-agent-val').textContent = e.target.value;
-  if (state.activeTab === 'agents') loadAgents();
-});
-
-// Table sorting
-document.getElementById('comp-table').addEventListener('click', e => {
-  const th = e.target.closest('th[data-col]');
-  if (!th) return;
-  const col = th.dataset.col;
-  state.compSort.dir = state.compSort.col === col ? -state.compSort.dir : -1;
-  state.compSort.col = col;
-  renderComps();
-});
-document.getElementById('agent-table').addEventListener('click', e => {
-  const th = e.target.closest('th[data-col]');
-  if (!th) return;
-  const col = th.dataset.col;
-  state.agentSort.dir = state.agentSort.col === col ? -state.agentSort.dir : -1;
-  state.agentSort.col = col;
-  renderAgents();
-});
-
-init();
+fetchData();
 </script>
 </body>
 </html>
