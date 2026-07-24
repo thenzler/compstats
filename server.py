@@ -72,34 +72,10 @@ def agents(map: str = "", tiers: str = "", min_sample: int = 5):
 
 @app.get("/api/maps/meta")
 def maps_meta(tiers: str = ""):
-    """Attack vs defense win rate per map."""
-    con = db.connect()
-    tier_list = [t.strip() for t in tiers.split(",") if t.strip()]
-    tier_clause = f"AND m.tier IN ({','.join('?'*len(tier_list))})" if tier_list else ""
-
-    rows = con.execute(f"""
-        SELECT mr.map_name,
-               SUM(CASE WHEN mr.winner='A' THEN 1 ELSE 0 END) as a_wins,
-               COUNT(*) as total
-        FROM map_results mr
-        JOIN matches m ON m.id=mr.match_id
-        WHERE 1=1 {tier_clause}
-        GROUP BY mr.map_name
-        HAVING total >= 5
-        ORDER BY mr.map_name
-    """, tier_list).fetchall()
-
-    # winner A = agents_a won — but we don't track attack/defense side per map
-    # so we just return total map counts for now
-    result = []
-    for r in rows:
-        result.append({
-            "map": r["map_name"],
-            "total": r["total"],
-            "a_wins": r["a_wins"],
-            "b_wins": r["total"] - r["a_wins"]
-        })
-    return JSONResponse(result)
+    """Per-map stats: total, avg_rounds, atk_wr, pistol_atk_wr."""
+    tier_list = [t.strip() for t in tiers.split(",") if t.strip()] or None
+    rows = analyse.map_meta_stats(tiers=tier_list)
+    return JSONResponse(rows)
 
 
 @app.on_event("startup")

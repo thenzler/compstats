@@ -31,6 +31,77 @@ def classify_tier(event_name: str) -> str:
     return "T3"
 
 
+# ── Round data parser ────────────────────────────────────────────────────────
+
+def _parse_rounds(game_el) -> dict | None:
+    """
+    Parse per-round attack/defense data from .vlr-rounds-row-col columns.
+    Each round column has two .rnd-sq divs (team A top, team B bottom).
+    Classes: mod-win = winner, mod-t = T-side (attack), mod-ct = CT-side (defense).
+    Returns dict with score/atk/def/pistol fields, or None if no round data.
+    """
+    cols = game_el.select(".vlr-rounds-row-col")
+    if len(cols) < 2:
+        return None
+
+    score_a = score_b = 0
+    a_atk = a_def = b_atk = b_def = 0
+    pistol1_atk = pistol2_atk = None
+
+    for col in cols[1:]:  # first col is team label
+        sqs = col.select(".rnd-sq")
+        if len(sqs) < 2:
+            continue
+        cls_a = set(sqs[0].get("class") or [])
+        cls_b = set(sqs[1].get("class") or [])
+        a_won = "mod-win" in cls_a
+        b_won = "mod-win" in cls_b
+        if not a_won and not b_won:
+            continue  # unused OT slot
+
+        num_el = col.select_one(".rnd-num")
+        rnd_num = int(num_el.get_text(strip=True)) if num_el else 0
+
+        if a_won:
+            score_a += 1
+            t_won = "mod-t" in cls_a
+            if t_won:                 a_atk += 1
+            elif "mod-ct" in cls_a:   a_def += 1
+        else:
+            score_b += 1
+            t_won = "mod-t" in cls_b
+            if t_won:                 b_atk += 1
+            elif "mod-ct" in cls_b:   b_def += 1
+
+        if rnd_num == 1:   pistol1_atk = 1 if t_won else 0
+        elif rnd_num == 13: pistol2_atk = 1 if t_won else 0
+
+    if score_a + score_b == 0:
+        return None
+
+    return {
+        "score_a": score_a, "score_b": score_b,
+        "a_atk_wins": a_atk, "a_def_wins": a_def,
+        "b_atk_wins": b_atk, "b_def_wins": b_def,
+        "pistol1_atk": pistol1_atk, "pistol2_atk": pistol2_atk,
+    }
+
+
+def parse_match_rounds(match_id: str) -> list[dict] | None:
+    """Re-scrape match page for round data only (no agent re-parsing)."""
+    soup = _get(f"/{match_id}")
+    results = []
+    for game_el in soup.select(".vm-stats-game[data-game-id]"):
+        map_span = game_el.select_one(".map span")
+        map_name = map_span.contents[0].strip() if map_span else ""
+        if not map_name:
+            continue
+        rd = _parse_rounds(game_el)
+        if rd:
+            results.append({"map": map_name, **rd})
+    return results or None
+
+
 # ── Match page parser ─────────────────────────────────────────────────────────
 
 def parse_match(match_id: str) -> dict | None:
@@ -92,7 +163,11 @@ def parse_match(match_id: str) -> dict | None:
         if len(agents_a) != 5 or len(agents_b) != 5:
             continue
 
-        maps.append({"map": map_name, "agents_a": agents_a, "agents_b": agents_b, "winner": win_side})
+        rounds = _parse_rounds(game_el)
+        maps.append({
+            "map": map_name, "agents_a": agents_a, "agents_b": agents_b,
+            "winner": win_side, **(rounds or {})
+        })
 
     if not maps:
         return None
@@ -150,6 +225,7 @@ if __name__ == "__main__":
     p_event.add_argument("event_id")
 
     p_events = sub.add_parser("events", help="List recent events")
+    sub.add_parser("refresh-rounds", help="Backfill atk/def round data for all scraped matches")
 
     args = parser.parse_args()
     con = db.connect()
@@ -179,3 +255,21 @@ if __name__ == "__main__":
     elif args.cmd == "events":
         for eid, name in event_ids():
             print(f"{eid:>8}  {classify_tier(name):3}  {name}")
+
+    elif args.cmd == "refresh-rounds":
+        rows = con.execute("SELECT id FROM matches").fetchall()
+        ids = [r[0] for r in rows]
+        print(f"Refreshing round data for {len(ids)} matches…")
+        ok = skipped = 0
+        for mid in ids:
+            if not db.needs_round_refresh(con, mid):
+                skipped += 1
+                continue
+            result = parse_match_rounds(mid)
+            if result:
+                db.update_map_rounds(con, mid, result)
+                ok += 1
+                print(f"  updated {mid} ({len(result)} maps)")
+            else:
+                print(f"  skip    {mid} (no round data)")
+        print(f"Done: {ok} updated, {skipped} already had data.")

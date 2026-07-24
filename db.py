@@ -40,6 +40,18 @@ def _q(sql: str) -> str:
 
 # ── Schema init ───────────────────────────────────────────────────────────────
 
+_ROUND_COLS = [
+    ("score_a",     "INTEGER"),
+    ("score_b",     "INTEGER"),
+    ("a_atk_wins",  "INTEGER"),
+    ("a_def_wins",  "INTEGER"),
+    ("b_atk_wins",  "INTEGER"),
+    ("b_def_wins",  "INTEGER"),
+    ("pistol1_atk", "INTEGER"),
+    ("pistol2_atk", "INTEGER"),
+]
+
+
 def _init_pg(con) -> None:
     with con.cursor() as cur:
         cur.execute("""
@@ -58,10 +70,24 @@ def _init_pg(con) -> None:
             map_name    TEXT,
             agents_a    TEXT,
             agents_b    TEXT,
-            winner      TEXT
+            winner      TEXT,
+            score_a     INTEGER,
+            score_b     INTEGER,
+            a_atk_wins  INTEGER,
+            a_def_wins  INTEGER,
+            b_atk_wins  INTEGER,
+            b_def_wins  INTEGER,
+            pistol1_atk INTEGER,
+            pistol2_atk INTEGER
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier)")
+        # Migration: add columns if they don't exist yet
+        for col, typ in _ROUND_COLS:
+            try:
+                cur.execute(f"ALTER TABLE map_results ADD COLUMN {col} {typ}")
+            except Exception:
+                pass  # column already exists
     con.commit()
 
 
@@ -73,11 +99,20 @@ def _init_sqlite(con) -> None:
     );
     CREATE TABLE IF NOT EXISTS map_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT, match_id TEXT REFERENCES matches(id),
-        map_name TEXT, agents_a TEXT, agents_b TEXT, winner TEXT
+        map_name TEXT, agents_a TEXT, agents_b TEXT, winner TEXT,
+        score_a INTEGER, score_b INTEGER,
+        a_atk_wins INTEGER, a_def_wins INTEGER,
+        b_atk_wins INTEGER, b_def_wins INTEGER,
+        pistol1_atk INTEGER, pistol2_atk INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name);
     CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier);
     """)
+    # Migration: add columns to existing DB if missing
+    existing = {row[1] for row in con.execute("PRAGMA table_info(map_results)").fetchall()}
+    for col, typ in _ROUND_COLS:
+        if col not in existing:
+            con.execute(f"ALTER TABLE map_results ADD COLUMN {col} {typ}")
     con.commit()
 
 
@@ -100,6 +135,15 @@ def _fetchall(con, sql: str, params=()):
     return _exec(con, sql, params).fetchall()
 
 
+def _round_vals(m: dict) -> tuple:
+    return (
+        m.get("score_a"), m.get("score_b"),
+        m.get("a_atk_wins"), m.get("a_def_wins"),
+        m.get("b_atk_wins"), m.get("b_def_wins"),
+        m.get("pistol1_atk"), m.get("pistol2_atk"),
+    )
+
+
 def insert_match(con, match_id: str, event_name: str, tier: str,
                  date: str, team_a: str, team_b: str, maps: list[dict]) -> None:
     if _USE_PG:
@@ -110,18 +154,52 @@ def insert_match(con, match_id: str, event_name: str, tier: str,
             )
             for m in maps:
                 cur.execute(
-                    "INSERT INTO map_results (match_id,map_name,agents_a,agents_b,winner) VALUES (%s,%s,%s,%s,%s)",
-                    (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"])
+                    """INSERT INTO map_results
+                       (match_id,map_name,agents_a,agents_b,winner,
+                        score_a,score_b,a_atk_wins,a_def_wins,b_atk_wins,b_def_wins,pistol1_atk,pistol2_atk)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"],
+                     *_round_vals(m))
                 )
     else:
         con.execute("INSERT OR IGNORE INTO matches VALUES (?,?,?,?,?,?)",
                     (match_id, event_name, tier, date, team_a, team_b))
         for m in maps:
             con.execute(
-                "INSERT INTO map_results (match_id,map_name,agents_a,agents_b,winner) VALUES (?,?,?,?,?)",
-                (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"])
+                """INSERT INTO map_results
+                   (match_id,map_name,agents_a,agents_b,winner,
+                    score_a,score_b,a_atk_wins,a_def_wins,b_atk_wins,b_def_wins,pistol1_atk,pistol2_atk)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"],
+                 *_round_vals(m))
             )
     con.commit()
+
+
+def update_map_rounds(con, match_id: str, rounds: list[dict]) -> None:
+    """Update round data for existing map_results rows (used by refresh-rounds)."""
+    sql = _q("""UPDATE map_results SET
+        score_a=?, score_b=?,
+        a_atk_wins=?, a_def_wins=?,
+        b_atk_wins=?, b_def_wins=?,
+        pistol1_atk=?, pistol2_atk=?
+        WHERE match_id=? AND map_name=?""")
+    if _USE_PG:
+        with con.cursor() as cur:
+            for r in rounds:
+                cur.execute(sql, (*_round_vals(r), match_id, r["map"]))
+    else:
+        for r in rounds:
+            con.execute(sql, (*_round_vals(r), match_id, r["map"]))
+    con.commit()
+
+
+def needs_round_refresh(con, match_id: str) -> bool:
+    """True if any map_results row for this match is missing round data."""
+    row = _fetchone(con,
+        "SELECT 1 FROM map_results WHERE match_id=? AND a_atk_wins IS NOT NULL LIMIT 1",
+        (match_id,))
+    return not bool(row)
 
 
 def already_scraped(con, match_id: str) -> bool:

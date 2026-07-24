@@ -169,9 +169,9 @@ const S = {
   minPick: 1,
   query: '',
   sort: {
-    comps:  { key:'win_pct', dir:-1 },
-    agents: { key:'pick',    dir:-1 },
-    maps:   { key:'matches', dir:-1 }
+    comps:  { key:'win_pct',  dir:-1 },
+    agents: { key:'pick',     dir:-1 },
+    maps:   { key:'matches',  dir:-1 }
   },
   rawComps:  [],
   rawAgents: [],
@@ -211,15 +211,22 @@ function archSquares(arch) {
 function aggComps() {
   const agg = {};
   for (const r of S.rawComps) {
-    if (!agg[r.comp]) agg[r.comp] = { comp:r.comp, wins:0, total:0 };
-    agg[r.comp].wins  += r.wins;
-    agg[r.comp].total += r.total;
+    if (!agg[r.comp]) agg[r.comp] = { comp:r.comp, wins:0, total:0, atk_wins:0, atk_rounds:0, def_wins:0, def_rounds:0 };
+    const a = agg[r.comp];
+    a.wins       += r.wins;
+    a.total      += r.total;
+    a.atk_wins   += r.atk_wins   || 0;
+    a.atk_rounds += r.atk_rounds || 0;
+    a.def_wins   += r.def_wins   || 0;
+    a.def_rounds += r.def_rounds || 0;
   }
   return Object.values(agg).map(c => ({
-    comp:    c.comp,
-    wins:    c.wins,
-    total:   c.total,
-    win_pct: c.total ? c.wins / c.total * 100 : 0
+    comp:      c.comp,
+    wins:      c.wins,
+    total:     c.total,
+    win_pct:   c.total      ? c.wins      / c.total      * 100 : 0,
+    atk_wr:    c.atk_rounds ? c.atk_wins  / c.atk_rounds * 100 : null,
+    def_wr:    c.def_rounds ? c.def_wins  / c.def_rounds * 100 : null,
   }));
 }
 
@@ -397,9 +404,11 @@ function buildKpis() {
   // maps tab
   const { rows } = filteredMaps();
   const top = rows.length ? [...rows].sort((a,b)=>b.matches-a.matches)[0] : null;
+  const withRounds = rows.filter(m => m.atk_wr != null);
+  const avgAtk = withRounds.length ? withRounds.reduce((s,m)=>s+m.atk_wr,0)/withRounds.length : null;
   return [
     { label:'Maps in pool', value:String(rows.length), sub:S.map?'filtered':'all' },
-    { label:'Balanced maps', value:String(rows.filter(m=>Math.abs(m.a_wr-50)<=2).length), sub:'within ±2% WR' },
+    { label:'Avg attack WR', value:avgAtk?avgAtk.toFixed(1)+'%':'—', sub:withRounds.length?'across maps':'no round data', subColor:avgAtk?(Math.abs(avgAtk-50)<1?'#9AA0A8':avgAtk>50?'#E5484D':'#46A758'):'#62696D' },
     { label:'Most played', value:top?num(top.matches):'—', sub:top?top.name:'', subColor:'#9AA0A8' },
     { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
   ];
@@ -427,10 +436,11 @@ function filteredAgents() {
 function filteredMaps() {
   const q   = S.query.trim().toLowerCase();
   const all = S.rawMaps.map(m => ({
-    name:    m.map,
-    matches: m.total,
-    a_wr:    m.total ? m.a_wins / m.total * 100 : 50,
-    b_wr:    m.total ? m.b_wins / m.total * 100 : 50
+    name:          m.map,
+    matches:       m.total,
+    atk_wr:        m.atk_wr,
+    avg_rounds:    m.avg_rounds,
+    pistol_atk_wr: m.pistol_atk_wr,
   }));
   const rows = all.filter(m => !q || m.name.toLowerCase().includes(q));
   return { rows: sortRows(rows, 'maps'), total: all.length };
@@ -504,12 +514,16 @@ function emptyRow(msg) {
 
 // ── Comps table ───────────────────────────────────────────────────────────────
 
+function fmt(v, suffix='%') { return v != null ? v.toFixed(1) + suffix : '—'; }
+
 function buildCompsTable(rows) {
   const COLS = [
     { w:'44px',               label:'#' },
-    { w:'minmax(220px,1fr)',   label:'Archetype', sort:'comp',    asc:true },
-    { w:'90px',               label:'Matches',   sort:'total',   right:true },
-    { w:'180px',              label:'Win Rate',  sort:'win_pct', pl:true }
+    { w:'minmax(190px,1fr)',  label:'Archetype', sort:'comp',    asc:true },
+    { w:'80px',               label:'Matches',   sort:'total',   right:true },
+    { w:'168px',              label:'Win Rate',  sort:'win_pct', pl:true },
+    { w:'72px',               label:'Atk WR',    sort:'atk_wr',  right:true },
+    { w:'72px',               label:'Def WR',    sort:'def_wr',  right:true },
   ];
   const wrap = document.createElement('div');
   wrap.appendChild(hdrRow(COLS, 'comps'));
@@ -531,11 +545,13 @@ function buildCompsTable(rows) {
       </div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.total)}</div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
-        <div style="width:84px;height:4px;background:#262A32;flex:none">
+        <div style="width:70px;height:4px;background:#262A32;flex:none">
           <div style="height:4px;width:${barW(r.win_pct)};background:${wrColor(r.win_pct)}"></div>
         </div>
         <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.win_pct.toFixed(1)}%</span>
-      </div>`;
+      </div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.atk_wr!=null?wrColor(r.atk_wr):'#62696D'};text-align:right">${fmt(r.atk_wr)}</div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.def_wr!=null?wrColor(r.def_wr):'#62696D'};text-align:right">${fmt(r.def_wr)}</div>`;
     wrap.appendChild(el);
   });
   return wrap;
@@ -585,10 +601,12 @@ function buildAgentsTable(rows) {
 function buildMapsTable(rows) {
   const COLS = [
     { w:'44px',               label:'#' },
-    { w:'minmax(140px,0.8fr)',label:'Map',     sort:'name',    asc:true },
-    { w:'100px',              label:'Matches', sort:'matches', right:true },
-    { w:'180px',              label:'Side A WR', sort:'a_wr', pl:true },
-    { w:'minmax(180px,1fr)',  label:'Top Archetype' }
+    { w:'minmax(120px,0.7fr)',label:'Map',         sort:'name',          asc:true },
+    { w:'80px',               label:'Matches',     sort:'matches',       right:true },
+    { w:'162px',              label:'Atk WR',      sort:'atk_wr',        pl:true },
+    { w:'74px',               label:'Avg Rds',     sort:'avg_rounds',    right:true },
+    { w:'82px',               label:'Pistol Atk',  sort:'pistol_atk_wr', right:true },
+    { w:'minmax(160px,1fr)',  label:'Top Archetype' }
   ];
   const wrap = document.createElement('div');
   wrap.appendChild(hdrRow(COLS, 'maps'));
@@ -599,6 +617,7 @@ function buildMapsTable(rows) {
   rows.forEach((r, i) => {
     const top      = topArchForMap(r.name);
     const topLabel = top ? top.comp : '—';
+    const atkWr    = r.atk_wr;
     const el = document.createElement('div');
     el.className = 'row-hover';
     el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px;cursor:pointer`;
@@ -607,11 +626,15 @@ function buildMapsTable(rows) {
       <div style="font-size:13px;color:#E8E9EA">${r.name}</div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.matches)}</div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
-        <div style="width:84px;height:4px;background:#262A32;flex:none">
-          <div style="height:4px;width:${barW(r.a_wr)};background:${wrColor(r.a_wr)}"></div>
+        ${atkWr != null ? `
+        <div style="width:70px;height:4px;background:#262A32;flex:none">
+          <div style="height:4px;width:${barW(atkWr)};background:${wrColor(atkWr)}"></div>
         </div>
-        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.a_wr.toFixed(1)}%</span>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${atkWr.toFixed(1)}%</span>
+        ` : '<span style="font-family:ui-monospace,monospace;font-size:12px;color:#62696D">—</span>'}
       </div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${fmt(r.avg_rounds,'')}</div>
+      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${fmt(r.pistol_atk_wr)}</div>
       <div style="display:flex;align-items:center;gap:6px;overflow:hidden;padding-left:6px">
         ${top ? '<div style="display:flex;gap:2px;flex:none">' + archSquares(top.comp) + '</div>' : ''}
         <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#9AA0A8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${topLabel}</span>
