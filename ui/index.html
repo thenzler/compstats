@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CompStats</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --base:       #0B0C0E;
+  --surface:    #131519;
+  --surface-r:  #1B1E24;
+  --border:     #262A32;
+  --text-pri:   #E8E9EA;
+  --text-sec:   #9AA0A8;
+  --text-ter:   #62696D;
+  --accent:     #F0B429;
+  --win:        #46A758;
+  --loss:       #E5484D;
+  --gc:         #9B66D8;
+  --t1:         #F0B429;
+  --t2:         #3BB9C4;
+  --t3:         #9AA0A8;
+  --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+html, body { height: 100%; background: var(--base); color: var(--text-pri); font-family: var(--font); font-size: 13px; }
+
+/* ── Layout ── */
+.layout { display: grid; grid-template-rows: 44px 1fr; height: 100vh; }
+
+header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+header .brand { font-size: 11px; letter-spacing: .12em; color: var(--text-ter); font-weight: 600; }
+header .divider { width: 1px; height: 18px; background: var(--border); }
+
+.body { display: flex; overflow: hidden; }
+
+/* ── Sidebar ── */
+aside {
+  width: 220px; min-width: 220px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px 14px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+
+.filter-group label.group-label {
+  display: block; font-size: 10px; letter-spacing: .1em; color: var(--text-ter);
+  font-weight: 700; margin-bottom: 8px; text-transform: uppercase;
+}
+
+/* Tier pills */
+.tier-pills { display: flex; flex-direction: column; gap: 5px; }
+.tier-pill {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 5px;
+  cursor: pointer; user-select: none; transition: background .12s;
+  border: 1px solid transparent;
+}
+.tier-pill:hover { background: var(--surface-r); }
+.tier-pill.active { background: var(--surface-r); border-color: var(--border); }
+.tier-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.tier-pill .dot.T1  { background: var(--t1); }
+.tier-pill .dot.T2  { background: var(--t2); }
+.tier-pill .dot.T3  { background: var(--t3); }
+.tier-pill .dot.GC  { background: var(--gc); }
+.tier-pill span { font-size: 12px; color: var(--text-sec); }
+.tier-pill.active span { color: var(--text-pri); }
+
+/* Map selector */
+.map-list { display: flex; flex-direction: column; gap: 3px; }
+.map-item {
+  padding: 6px 10px; border-radius: 5px;
+  cursor: pointer; color: var(--text-sec); transition: all .1s;
+  border: 1px solid transparent;
+}
+.map-item:hover { background: var(--surface-r); color: var(--text-pri); }
+.map-item.active { background: var(--surface-r); border-color: var(--border); color: var(--text-pri); font-weight: 600; }
+
+/* Min sample slider */
+.slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.slider-row span { font-size: 11px; color: var(--text-sec); }
+input[type=range] {
+  -webkit-appearance: none; width: 100%; height: 3px;
+  background: var(--border); border-radius: 2px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+
+/* DB stats pill */
+.db-stat { font-size: 10px; color: var(--text-ter); margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+.db-stat strong { color: var(--text-sec); }
+
+/* ── Main content ── */
+main { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; }
+
+/* Tab bar */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.tab {
+  padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--text-sec);
+  cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color .12s, border-color .12s;
+}
+.tab:hover { color: var(--text-pri); }
+.tab.active { color: var(--text-pri); border-bottom-color: var(--accent); }
+
+/* Section */
+.section { display: none; flex-direction: column; gap: 16px; }
+.section.active { display: flex; }
+
+.section-header { display: flex; align-items: baseline; gap: 10px; }
+.section-header h2 { font-size: 13px; font-weight: 600; }
+.section-header .count { font-size: 11px; color: var(--text-ter); }
+
+/* ── Table ── */
+.tbl-wrap { overflow-x: auto; border-radius: 6px; border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; }
+thead tr { background: var(--surface-r); }
+th {
+  padding: 9px 12px; text-align: left;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-ter); white-space: nowrap; cursor: pointer; user-select: none;
+}
+th:hover { color: var(--text-sec); }
+th.sorted { color: var(--accent); }
+th .sort-arrow { margin-left: 4px; opacity: .5; }
+th.sorted .sort-arrow { opacity: 1; }
+
+tbody tr { border-top: 1px solid var(--border); transition: background .08s; }
+tbody tr:hover { background: var(--surface-r); }
+td { padding: 9px 12px; color: var(--text-sec); white-space: nowrap; }
+td.pri { color: var(--text-pri); font-weight: 500; }
+
+/* Win rate bar cell */
+.winbar-cell { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.winbar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.winbar-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+.winpct { font-size: 12px; font-weight: 600; min-width: 38px; }
+
+/* Tier badge */
+.tier-badge {
+  display: inline-block; padding: 2px 6px; border-radius: 3px;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+}
+.tier-badge.T1 { background: rgba(240,180,41,.15); color: var(--t1); }
+.tier-badge.T2 { background: rgba(59,185,196,.15); color: var(--t2); }
+.tier-badge.T3 { background: rgba(154,160,168,.12); color: var(--t3); }
+.tier-badge.GC { background: rgba(155,102,216,.15); color: var(--gc); }
+
+/* Comp tag */
+.comp-tag { font-family: monospace; font-size: 11px; color: var(--text-pri); letter-spacing: .02em; }
+
+/* Agent icon */
+.agent-icon { width: 20px; height: 20px; border-radius: 3px; vertical-align: middle; margin-right: 5px; }
+
+/* Map badge */
+.map-badge { font-size: 11px; color: var(--text-sec); }
+
+/* Empty state */
+.empty { text-align: center; padding: 48px 0; color: var(--text-ter); font-size: 12px; }
+
+/* Loading spinner */
+.loading { text-align: center; padding: 48px 0; color: var(--text-ter); font-size: 11px; letter-spacing: .1em; }
+
+/* ── Meta cards (map section) ── */
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.meta-card {
+  background: var(--surface-r); border: 1px solid var(--border); border-radius: 6px;
+  padding: 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.meta-card .map-name { font-size: 12px; font-weight: 600; }
+.meta-card .sample  { font-size: 10px; color: var(--text-ter); }
+.meta-card .side-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+.side-bar .a-side { background: var(--loss); }
+.side-bar .b-side { background: var(--win); }
+.meta-card .side-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-ter); }
+
+</style>
+</head>
+<body>
+<div class="layout">
+
+<header>
+  <span class="brand">COMPSTATS</span>
+  <div class="divider"></div>
+  <span id="db-summary" style="font-size:11px;color:var(--text-ter)">Loading…</span>
+</header>
+
+<div class="body">
+
+<!-- ── Sidebar ── -->
+<aside>
+  <div class="filter-group">
+    <label class="group-label">Tier</label>
+    <div class="tier-pills" id="tier-pills">
+      <div class="tier-pill active" data-tier="T1"><div class="dot T1"></div><span>T1 · VCT</span></div>
+      <div class="tier-pill active" data-tier="T2"><div class="dot T2"></div><span>T2 · Challengers</span></div>
+      <div class="tier-pill active" data-tier="T3"><div class="dot T3"></div><span>T3</span></div>
+      <div class="tier-pill active" data-tier="GC"><div class="dot GC"></div><span>Game Changers</span></div>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <label class="group-label">Map</label>
+    <div class="map-list" id="map-list">
+      <div class="map-item active" data-map="">All maps</div>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <label class="group-label">Min sample</label>
+    <div class="slider-row">
+      <span>Comps</span><span id="min-comp-val">15</span>
+    </div>
+    <input type="range" id="min-comp" min="5" max="80" value="15">
+    <br><br>
+    <div class="slider-row">
+      <span>Agents</span><span id="min-agent-val">10</span>
+    </div>
+    <input type="range" id="min-agent" min="3" max="60" value="10">
+  </div>
+
+  <div class="db-stat" id="db-stat">—</div>
+</aside>
+
+<!-- ── Main ── -->
+<main>
+  <div class="tabs">
+    <div class="tab active" data-tab="comps">Compositions</div>
+    <div class="tab" data-tab="agents">Agents</div>
+    <div class="tab" data-tab="maps">Map Meta</div>
+  </div>
+
+  <!-- Comps -->
+  <div class="section active" id="section-comps">
+    <div class="section-header">
+      <h2>Composition win rates</h2>
+      <span class="count" id="comp-count"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table id="comp-table">
+        <thead>
+          <tr>
+            <th data-col="comp" class="sorted">Archetype <span class="sort-arrow">↓</span></th>
+            <th data-col="map">Map</th>
+            <th data-col="win_pct">Win % <span class="sort-arrow">↓</span></th>
+            <th data-col="total">Sample</th>
+          </tr>
+        </thead>
+        <tbody id="comp-tbody"><tr><td colspan="4" class="loading">LOADING</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Agents -->
+  <div class="section" id="section-agents">
+    <div class="section-header">
+      <h2>Agent pick &amp; win rates</h2>
+      <span class="count" id="agent-count"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table id="agent-table">
+        <thead>
+          <tr>
+            <th data-col="agent">Agent</th>
+            <th data-col="map">Map</th>
+            <th data-col="picks" class="sorted">Picks <span class="sort-arrow">↓</span></th>
+            <th data-col="win_pct">Win % <span class="sort-arrow">↓</span></th>
+          </tr>
+        </thead>
+        <tbody id="agent-tbody"><tr><td colspan="4" class="loading">LOADING</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Maps -->
+  <div class="section" id="section-maps">
+    <div class="section-header">
+      <h2>Map play counts</h2>
+      <span class="count" id="map-count"></span>
+    </div>
+    <div class="meta-grid" id="meta-grid"></div>
+  </div>
+
+</main>
+</div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  tiers: new Set(['T1','T2','T3','GC']),
+  map: '',
+  minComp: 15,
+  minAgent: 10,
+  activeTab: 'comps',
+  compSort: { col: 'win_pct', dir: -1 },
+  agentSort: { col: 'picks', dir: -1 },
+};
+
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch(path);
+  return r.json();
+}
+
+function tiersParam() { return [...state.tiers].join(','); }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  await loadStats();
+  await loadMapList();
+  await refresh();
+}
+
+async function loadStats() {
+  const s = await api('/api/stats');
+  document.getElementById('db-summary').textContent =
+    `${s.matches.toLocaleString()} matches · ${s.map_results.toLocaleString()} map results`;
+
+  const tierParts = s.tiers.map(t => `${t.n} ${t.tier}`).join(' · ');
+  document.getElementById('db-stat').innerHTML =
+    `<strong>${tierParts}</strong>`;
+}
+
+async function loadMapList() {
+  const maps = await api('/api/maps/list?tiers=' + tiersParam());
+  const list = document.getElementById('map-list');
+  list.innerHTML = '<div class="map-item active" data-map="">All maps</div>' +
+    maps.map(m => `<div class="map-item" data-map="${m}">${m}</div>`).join('');
+  list.querySelectorAll('.map-item').forEach(el => {
+    el.addEventListener('click', () => {
+      list.querySelectorAll('.map-item').forEach(x => x.classList.remove('active'));
+      el.classList.add('active');
+      state.map = el.dataset.map;
+      refresh();
+    });
+  });
+  // restore active
+  list.querySelectorAll('.map-item').forEach(el => {
+    if (el.dataset.map === state.map) el.classList.add('active');
+  });
+}
+
+async function refresh() {
+  if (state.activeTab === 'comps')  await loadComps();
+  if (state.activeTab === 'agents') await loadAgents();
+  if (state.activeTab === 'maps')   await loadMaps();
+}
+
+// ── Compositions ─────────────────────────────────────────────────────────────
+let compData = [];
+
+async function loadComps() {
+  const tbody = document.getElementById('comp-tbody');
+  tbody.innerHTML = '<tr><td colspan="4" class="loading">LOADING</td></tr>';
+  const url = `/api/comps?map=${state.map}&tiers=${tiersParam()}&min_sample=${state.minComp}`;
+  compData = await api(url);
+  renderComps();
+}
+
+function renderComps() {
+  const { col, dir } = state.compSort;
+  const sorted = [...compData].sort((a, b) => dir * (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0));
+
+  document.getElementById('comp-count').textContent = `${sorted.length} rows`;
+
+  const tbody = document.getElementById('comp-tbody');
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No data — scrape more events first.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(r => {
+    const pct = r.win_pct;
+    const clr = pct >= 55 ? 'var(--win)' : pct <= 45 ? 'var(--loss)' : 'var(--accent)';
+    const mapCell = r.map && !state.map ? `<span class="map-badge">${r.map}</span>` : '—';
+    return `<tr>
+      <td class="pri"><span class="comp-tag">${r.comp}</span></td>
+      <td>${state.map ? '—' : (r.map ? `<span class="map-badge">${r.map}</span>` : '—')}</td>
+      <td>
+        <div class="winbar-cell">
+          <div class="winbar"><div class="winbar-fill" style="width:${pct}%;background:${clr}"></div></div>
+          <span class="winpct" style="color:${clr}">${pct}%</span>
+        </div>
+      </td>
+      <td>${r.total}</td>
+    </tr>`;
+  }).join('');
+
+  // Sort headers
+  document.querySelectorAll('#comp-table th').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.col === col);
+  });
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+let agentData = [];
+
+async function loadAgents() {
+  const tbody = document.getElementById('agent-tbody');
+  tbody.innerHTML = '<tr><td colspan="4" class="loading">LOADING</td></tr>';
+  const url = `/api/agents?map=${state.map}&tiers=${tiersParam()}&min_sample=${state.minAgent}`;
+  agentData = await api(url);
+  renderAgents();
+}
+
+function renderAgents() {
+  const { col, dir } = state.agentSort;
+  const sorted = [...agentData].sort((a, b) => dir * (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0));
+
+  document.getElementById('agent-count').textContent = `${sorted.length} rows`;
+
+  const tbody = document.getElementById('agent-tbody');
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No data — scrape more events first.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(r => {
+    const pct = r.win_pct;
+    const clr = pct >= 55 ? 'var(--win)' : pct <= 45 ? 'var(--loss)' : 'var(--accent)';
+    const iconUrl = `https://www.vlr.gg/img/vlr/game/agents/${r.agent}.png`;
+    return `<tr>
+      <td class="pri">
+        <img class="agent-icon" src="${iconUrl}" onerror="this.style.display='none'">
+        ${r.agent}
+      </td>
+      <td>${r.map ? `<span class="map-badge">${r.map}</span>` : '—'}</td>
+      <td>${r.picks}</td>
+      <td>
+        <div class="winbar-cell">
+          <div class="winbar"><div class="winbar-fill" style="width:${pct}%;background:${clr}"></div></div>
+          <span class="winpct" style="color:${clr}">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('#agent-table th').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.col === col);
+  });
+}
+
+// ── Maps meta ─────────────────────────────────────────────────────────────────
+async function loadMaps() {
+  const data = await api(`/api/maps/meta?tiers=${tiersParam()}`);
+  document.getElementById('map-count').textContent = `${data.length} maps`;
+  const grid = document.getElementById('meta-grid');
+  if (!data.length) { grid.innerHTML = '<div class="empty">No data yet.</div>'; return; }
+  grid.innerHTML = data.map(r => {
+    const aPct = Math.round(r.a_wins / r.total * 100);
+    return `<div class="meta-card">
+      <div class="map-name">${r.map}</div>
+      <div class="sample">${r.total} maps played</div>
+      <div class="side-bar">
+        <div class="a-side" style="width:${aPct}%"></div>
+        <div class="b-side" style="width:${100-aPct}%"></div>
+      </div>
+      <div class="side-labels"><span>Side A ${aPct}%</span><span>${100-aPct}% Side B</span></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Event wiring ──────────────────────────────────────────────────────────────
+// Tier pills
+document.getElementById('tier-pills').addEventListener('click', e => {
+  const pill = e.target.closest('.tier-pill');
+  if (!pill) return;
+  const t = pill.dataset.tier;
+  if (state.tiers.has(t)) { state.tiers.delete(t); pill.classList.remove('active'); }
+  else { state.tiers.add(t); pill.classList.add('active'); }
+  loadMapList();
+  refresh();
+});
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    tab.classList.add('active');
+    state.activeTab = tab.dataset.tab;
+    document.getElementById(`section-${state.activeTab}`).classList.add('active');
+    refresh();
+  });
+});
+
+// Sliders
+document.getElementById('min-comp').addEventListener('input', e => {
+  state.minComp = +e.target.value;
+  document.getElementById('min-comp-val').textContent = e.target.value;
+  if (state.activeTab === 'comps') loadComps();
+});
+document.getElementById('min-agent').addEventListener('input', e => {
+  state.minAgent = +e.target.value;
+  document.getElementById('min-agent-val').textContent = e.target.value;
+  if (state.activeTab === 'agents') loadAgents();
+});
+
+// Table sorting
+document.getElementById('comp-table').addEventListener('click', e => {
+  const th = e.target.closest('th[data-col]');
+  if (!th) return;
+  const col = th.dataset.col;
+  state.compSort.dir = state.compSort.col === col ? -state.compSort.dir : -1;
+  state.compSort.col = col;
+  renderComps();
+});
+document.getElementById('agent-table').addEventListener('click', e => {
+  const th = e.target.closest('th[data-col]');
+  if (!th) return;
+  const col = th.dataset.col;
+  state.agentSort.dir = state.agentSort.col === col ? -state.agentSort.dir : -1;
+  state.agentSort.col = col;
+  renderAgents();
+});
+
+init();
+</script>
+</body>
+</html>
