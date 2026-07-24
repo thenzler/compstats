@@ -109,12 +109,12 @@ def _init_pg(con) -> None:
         con.commit()
         # Add columns that may not exist yet — each in its own savepoint to avoid aborting the tx
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='map_results'")
-        existing_mr = {r[0] for r in cur.fetchall()}
+        existing_mr = {r["column_name"] for r in cur.fetchall()}
         for col, typ in _ROUND_COLS:
             if col not in existing_mr:
                 cur.execute(f"ALTER TABLE map_results ADD COLUMN {col} {typ}")
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='matches'")
-        existing_m = {r[0] for r in cur.fetchall()}
+        existing_m = {r["column_name"] for r in cur.fetchall()}
         for col, typ in (("season","TEXT"),("region","TEXT")):
             if col not in existing_m:
                 cur.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
