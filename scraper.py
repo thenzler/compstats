@@ -1,7 +1,9 @@
 """VLR.gg scraper — events → matches → map/agent/winner data."""
 from __future__ import annotations
-import re, time, json
+import re, time, json, sys
 from pathlib import Path
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import requests
 from bs4 import BeautifulSoup
