@@ -143,6 +143,40 @@ def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
     return sorted(result, key=lambda r: -r["total"])
 
 
+def comp_matchups(comp: str, map_name=None, tiers=None, seasons=None, regions=None):
+    """Win/loss record of comp against each different opponent comp (min 3 games)."""
+    con = db.connect()
+    tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)
+    rows = db.fetchall(con, f"""
+        SELECT mr.agents_a, mr.agents_b, mr.winner
+        FROM map_results mr JOIN matches m ON m.id = mr.match_id
+        WHERE 1=1 {tier_clause} {map_clause}
+    """, params)
+    matchups: dict[str, list] = defaultdict(lambda: [0, 0])
+    for row in rows:
+        d = dict(row)
+        agents_a = json.loads(d["agents_a"])
+        agents_b = json.loads(d["agents_b"])
+        comp_a = classify_comp(agents_a)
+        comp_b = classify_comp(agents_b)
+        if comp_a == comp:
+            opp, won = comp_b, d["winner"] == "A"
+        elif comp_b == comp:
+            opp, won = comp_a, d["winner"] == "B"
+        else:
+            continue
+        if opp == comp:
+            continue
+        matchups[opp][1] += 1
+        if won:
+            matchups[opp][0] += 1
+    return sorted(
+        [{"opp": o, "wins": w, "total": t, "win_pct": round(w / t * 100, 1) if t else 0}
+         for o, (w, t) in matchups.items() if t >= 3],
+        key=lambda x: -x["total"]
+    )
+
+
 def agent_pickrates(map_name=None, tiers=None, seasons=None, regions=None):
     con = db.connect()
     tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)

@@ -94,6 +94,12 @@ def comps(map: str = "", tiers: str = "", seasons: str = "", regions: str = "", 
     return JSONResponse(rows)
 
 
+@app.get("/api/comp/matchups")
+def comp_matchups_ep(comp: str, map: str = "", tiers: str = "", seasons: str = "", regions: str = ""):
+    rows = analyse.comp_matchups(comp, map_name=map or None, tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions))
+    return JSONResponse(rows)
+
+
 @app.get("/api/agents")
 def agents(map: str = "", tiers: str = "", seasons: str = "", regions: str = "", min_sample: int = 5):
     rows = analyse.agent_pickrates(
