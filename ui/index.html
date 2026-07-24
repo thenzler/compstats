@@ -65,6 +65,22 @@
 
       <div style="border-top:1px solid #262A32;padding:12px 12px 10px">
         <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px">
+          <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase">Season</div>
+          <div id="season-all-btn" style="font-size:10px;letter-spacing:0.06em;color:#9AA0A8;cursor:pointer;text-transform:uppercase">All</div>
+        </div>
+        <div id="season-pills" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+      </div>
+
+      <div style="border-top:1px solid #262A32;padding:12px 12px 10px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px">
+          <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase">Region</div>
+          <div id="region-all-btn" style="font-size:10px;letter-spacing:0.06em;color:#9AA0A8;cursor:pointer;text-transform:uppercase">All</div>
+        </div>
+        <div id="region-pills" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+      </div>
+
+      <div style="border-top:1px solid #262A32;padding:12px 12px 10px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px">
           <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase">Map</div>
           <div id="map-all-btn" style="font-size:10px;letter-spacing:0.06em;color:#9AA0A8;cursor:pointer;text-transform:uppercase">All</div>
         </div>
@@ -169,7 +185,7 @@ const S = {
   minPick: 1,
   query: '',
   sort: {
-    comps:  { key:'win_pct',  dir:-1 },
+    comps:  { key:'nm_win_pct', dir:-1 },
     agents: { key:'pick',     dir:-1 },
     maps:   { key:'matches',  dir:-1 }
   },
@@ -178,7 +194,15 @@ const S = {
   rawMaps:   [],
   mapList:   [],
   totalMatches: 0,
-  totalMapResults: 0
+  totalMapResults: 0,
+  agentData: {},
+  mapData: {},
+  roleData: {},
+  expanded: new Set(),
+  seasons: {},   // { "2026": true, ... } — all true by default after load
+  regions: {},   // { "Americas": true, ... }
+  availSeasons: [],
+  availRegions: []
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -186,8 +210,12 @@ const S = {
 const num    = n => Math.round(n).toLocaleString('en-US');
 const wrColor = v => v >= 52 ? '#46A758' : v >= 47.5 ? '#5B8DEF' : '#E5484D';
 const barW    = v => Math.max(2, Math.min(100, (v - 35) / 30 * 100)).toFixed(1) + '%';
-const activeTiers = () => TIERS.filter(t => S.tiers[t.key]);
-const tierParam   = () => activeTiers().map(t => t.key).join(',');
+const activeTiers   = () => TIERS.filter(t => S.tiers[t.key]);
+const tierParam     = () => activeTiers().map(t => t.key).join(',');
+const activeSeasons = () => S.availSeasons.filter(s => S.seasons[s] !== false);
+const activeRegions = () => S.availRegions.filter(r => S.regions[r] !== false);
+const seasonParam   = () => activeSeasons().join(',');
+const regionParam   = () => activeRegions().join(',');
 
 function expandArch(arch) {
   const map = { s:'Sentinel', d:'Duelist', i:'Initiator', c:'Controller' };
@@ -201,9 +229,11 @@ function expandArch(arch) {
 }
 
 function archSquares(arch) {
-  return expandArch(arch).map(role =>
-    `<span style="width:4px;height:14px;background:${role ? ROLE_COLOR[role] : '#2A2F38'};flex:none;display:inline-block"></span>`
-  ).join('');
+  return expandArch(arch).map(role => {
+    const icon = role && S.roleData[role];
+    if (icon) return `<img src="${icon}" style="width:14px;height:14px;flex:none;opacity:0.75" title="${role}">`;
+    return `<span style="width:4px;height:14px;background:${role ? ROLE_COLOR[role] : '#2A2F38'};flex:none;display:inline-block"></span>`;
+  }).join('');
 }
 
 // ── Aggregation ──────────────────────────────────────────────────────────────
@@ -211,7 +241,11 @@ function archSquares(arch) {
 function aggComps() {
   const agg = {};
   for (const r of S.rawComps) {
-    if (!agg[r.comp]) agg[r.comp] = { comp:r.comp, wins:0, total:0, atk_wins:0, atk_rounds:0, def_wins:0, def_rounds:0 };
+    if (!agg[r.comp]) agg[r.comp] = {
+      comp:r.comp, wins:0, total:0,
+      atk_wins:0, atk_rounds:0, def_wins:0, def_rounds:0,
+      nm_wins:0, nm_total:0, agents:{}, luMap:{}
+    };
     const a = agg[r.comp];
     a.wins       += r.wins;
     a.total      += r.total;
@@ -219,14 +253,32 @@ function aggComps() {
     a.atk_rounds += r.atk_rounds || 0;
     a.def_wins   += r.def_wins   || 0;
     a.def_rounds += r.def_rounds || 0;
+    a.nm_wins    += r.nm_wins    || 0;
+    a.nm_total   += r.nm_total   || 0;
+    for (const [ag, cnt] of Object.entries(r.agents || {}))
+      a.agents[ag] = (a.agents[ag] || 0) + cnt;
+    for (const lu of r.lineups || []) {
+      const lk = lu.agents.slice().sort().join(',');
+      if (!a.luMap[lk]) a.luMap[lk] = { agents: lu.agents, wins: 0, total: 0 };
+      a.luMap[lk].wins  += lu.wins;
+      a.luMap[lk].total += lu.total;
+    }
   }
   return Object.values(agg).map(c => ({
-    comp:      c.comp,
-    wins:      c.wins,
-    total:     c.total,
-    win_pct:   c.total      ? c.wins      / c.total      * 100 : 0,
-    atk_wr:    c.atk_rounds ? c.atk_wins  / c.atk_rounds * 100 : null,
-    def_wr:    c.def_rounds ? c.def_wins  / c.def_rounds * 100 : null,
+    comp:           c.comp,
+    wins:           c.wins,
+    total:          c.total,
+    win_pct:        c.total      ? c.wins     / c.total      * 100 : 0,
+    atk_wr:         c.atk_rounds ? c.atk_wins / c.atk_rounds * 100 : null,
+    def_wr:         c.def_rounds ? c.def_wins / c.def_rounds * 100 : null,
+    nm_total:       c.nm_total,
+    nm_win_pct:     c.nm_total   ? c.nm_wins  / c.nm_total   * 100 : null,
+    mirror_matches: (c.total - c.nm_total) / 2,
+    agents:         c.agents,
+    lineups:        Object.values(c.luMap)
+      .map(lu => ({ ...lu, win_pct: lu.total ? lu.wins/lu.total*100 : 0 }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 12),
   }));
 }
 
@@ -245,8 +297,8 @@ function aggAgents() {
     picks:   a.picks,
     wins:    a.wins,
     win_pct: a.picks ? a.wins / a.picks * 100 : 0,
-    // pick% = plays per map (totalPicks = total_maps * 10 slots)
-    pick:    totalPicks ? a.picks / (totalPicks / 10) * 100 : 0
+    // pick% = % of teams that ran this agent (totalPicks/5 = total team appearances)
+    pick:    totalPicks ? a.picks / (totalPicks / 5) * 100 : 0
   }));
 }
 
@@ -256,18 +308,61 @@ function topArchForMap(mapName) {
   return forMap.reduce((best, c) => c.total > best.total ? c : best);
 }
 
+// ── Valorant API ─────────────────────────────────────────────────────────────
+
+async function loadValApiData() {
+  if (Object.keys(S.agentData).length) return;
+  try {
+    const [aRes, mRes] = await Promise.all([
+      fetch('https://valorant-api.com/v1/agents?isPlayableCharacter=true'),
+      fetch('https://valorant-api.com/v1/maps')
+    ]);
+    const [aJson, mJson] = await Promise.all([aRes.json(), mRes.json()]);
+    for (const a of aJson.data) {
+      const key = a.displayName.toLowerCase().replace(/[^a-z]/g, '');
+      S.agentData[key] = {
+        icon:     a.displayIcon,
+        roleIcon: a.role?.displayIcon || ''
+      };
+      if (a.role?.displayName && !S.roleData[a.role.displayName])
+        S.roleData[a.role.displayName] = a.role.displayIcon;
+    }
+    for (const m of mJson.data) {
+      if (!m.displayName) continue;
+      S.mapData[m.displayName.toLowerCase()] = {
+        listIcon: m.listViewIcon || m.displayIcon
+      };
+    }
+  } catch(e) {
+    console.warn('val-api unavailable', e);
+  }
+}
+
 // ── API Fetch ────────────────────────────────────────────────────────────────
 
+async function loadFilters() {
+  if (S.availSeasons.length) return;
+  try {
+    const res = await fetch('/api/filters');
+    const { seasons, regions } = await res.json();
+    S.availSeasons = seasons;
+    S.availRegions = regions;
+  } catch(e) { console.warn('filters unavailable', e); }
+}
+
 async function fetchData() {
-  const tiers = encodeURIComponent(tierParam());
-  const map   = encodeURIComponent(S.map || '');
+  const tiers   = encodeURIComponent(tierParam());
+  const seasons = encodeURIComponent(seasonParam());
+  const regions = encodeURIComponent(regionParam());
+  const map     = encodeURIComponent(S.map || '');
   setStatus('dim', 'loading…');
 
   try {
+    await Promise.all([loadValApiData(), loadFilters()]);
     const [cRes, aRes, mRes, sRes] = await Promise.all([
-      fetch(`/api/comps?tiers=${tiers}&map=${map}&min_sample=1`),
-      fetch(`/api/agents?tiers=${tiers}&map=${map}&min_sample=1`),
-      fetch(`/api/maps/meta?tiers=${tiers}`),
+      fetch(`/api/comps?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
+      fetch(`/api/agents?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
+      fetch(`/api/maps/meta?tiers=${tiers}&seasons=${seasons}&regions=${regions}`),
       fetch('/api/stats')
     ]);
 
@@ -323,6 +418,23 @@ function renderSidebar() {
     ? active.map(t => t.key).join('+') + ' · ' + num(S.totalMatches) + ' matches'
     : 'no tiers selected';
 
+  // Season pills
+  function makePills(containerId, keys, stateObj, onChange) {
+    const c = document.getElementById(containerId);
+    c.innerHTML = '';
+    keys.forEach(k => {
+      const on = stateObj[k] !== false;
+      const el = document.createElement('div');
+      el.className = 'pill';
+      el.style.cssText = `padding:3px 8px;font-size:11px;border:1px solid ${on?'#3A3F47':'#1E2127'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#62696D'}`;
+      el.textContent = k;
+      el.onclick = () => { stateObj[k] = !on; onChange(); };
+      c.appendChild(el);
+    });
+  }
+  makePills('season-pills', S.availSeasons, S.seasons, fetchData);
+  makePills('region-pills', S.availRegions, S.regions, fetchData);
+
   // Map list
   const list = document.getElementById('map-list');
   list.innerHTML = '';
@@ -331,7 +443,13 @@ function renderSidebar() {
     const el = document.createElement('div');
     el.className = 'map-item';
     el.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border:1px solid ${on?'#3A3F47':'transparent'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#9AA0A8'}`;
-    el.innerHTML = `<span style="font-size:12px">${m.map}</span><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${num(m.total)}</span>`;
+    const mIcon = S.mapData[m.map.toLowerCase()]?.listIcon;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:7px;overflow:hidden">
+        ${mIcon ? `<img src="${mIcon}" style="width:28px;height:16px;object-fit:cover;flex:none;opacity:0.75">` : ''}
+        <span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.map}</span>
+      </div>
+      <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D;flex:none">${num(m.total)}</span>`;
     el.onclick = () => { S.map = on ? null : m.map; fetchData(); };
     list.appendChild(el);
   });
@@ -344,8 +462,10 @@ function renderTabs() {
     el.style.color     = active ? '#E8E9EA' : '#9AA0A8';
     el.style.boxShadow = active ? 'inset 0 -2px 0 #5B8DEF' : 'none';
   });
-  document.getElementById('scope-label').textContent =
-    (S.map || 'all maps') + ' · ' + (activeTiers().map(t => t.key).join('/') || 'none');
+  const scopeParts = [activeTiers().map(t=>t.key).join('/') || 'no tier'];
+  if (activeSeasons().length < S.availSeasons.length) scopeParts.push(activeSeasons().join('/'));
+  if (activeRegions().length < S.availRegions.length) scopeParts.push(activeRegions().join('/'));
+  document.getElementById('scope-label').textContent = (S.map || 'all maps') + ' · ' + scopeParts.join(' · ');
 }
 
 function renderMain() {
@@ -375,16 +495,18 @@ function renderKpis() {
 function buildKpis() {
   if (S.tab === 'comps') {
     const { rows, total } = filteredComps();
-    const avgWr = rows.length ? rows.reduce((s,r)=>s+r.win_pct,0)/rows.length : null;
-    const top   = rows.length ? [...rows].sort((a,b)=>b.win_pct-a.win_pct)[0] : null;
+    const nmRows = rows.filter(r => r.nm_win_pct != null);
+    const avgNmWr = nmRows.length ? nmRows.reduce((s,r)=>s+r.nm_win_pct,0)/nmRows.length : null;
+    const top = nmRows.length ? [...nmRows].sort((a,b)=>b.nm_win_pct-a.nm_win_pct)[0] : null;
+    const mirrorTotal = rows.reduce((s,r)=>s+(r.mirror_matches||0),0);
     return [
       { label:'Archetypes in view', value:String(rows.length), sub:'of '+total },
-      { label:'Avg win rate',
-        value: avgWr ? avgWr.toFixed(1)+'%' : '—',
-        sub:   avgWr ? (avgWr>=50?'above even':'below even') : '',
-        subColor: avgWr ? (avgWr>=50?'#46A758':'#E5484D') : '#62696D' },
-      { label:'Top archetype WR', value:top?top.win_pct.toFixed(1)+'%':'—', sub:top?top.comp:'', subColor:'#9AA0A8' },
-      { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
+      { label:'Avg non-mirror WR',
+        value: avgNmWr != null ? avgNmWr.toFixed(1)+'%' : '—',
+        sub:   avgNmWr != null ? (avgNmWr>=50?'above even':'below even') : '',
+        subColor: avgNmWr != null ? (avgNmWr>=50?'#46A758':'#E5484D') : '#62696D' },
+      { label:'Top non-mirror WR', value:top?top.nm_win_pct.toFixed(1)+'%':'—', sub:top?top.comp:'', subColor:'#9AA0A8' },
+      { label:'Mirror matches', value:num(mirrorTotal), sub:'excluded from WR' }
     ];
   }
   if (S.tab === 'agents') {
@@ -397,7 +519,7 @@ function buildKpis() {
         value: avgWr ? avgWr.toFixed(1)+'%' : '—',
         sub:   avgWr ? (avgWr>=50?'above even':'below even') : '',
         subColor: avgWr ? (avgWr>=50?'#46A758':'#E5484D') : '#62696D' },
-      { label:'Highest pick%', value:topPk?topPk.pick.toFixed(1)+'%':'—', sub:topPk?topPk.name:'', subColor:'#9AA0A8' },
+      { label:'Highest team pick%', value:topPk?topPk.pick.toFixed(1)+'%':'—', sub:topPk?topPk.name:'', subColor:'#9AA0A8' },
       { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
     ];
   }
@@ -450,6 +572,9 @@ function sortRows(rows, tab) {
   const { key, dir } = S.sort[tab];
   return rows.slice().sort((a, b) => {
     const x = a[key], y = b[key];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
     return typeof x === 'string' ? x.localeCompare(y) * dir : (x - y) * dir;
   });
 }
@@ -516,14 +641,44 @@ function emptyRow(msg) {
 
 function fmt(v, suffix='%') { return v != null ? v.toFixed(1) + suffix : '—'; }
 
+function buildAgentExpansion(r) {
+  if (!r.lineups?.length)
+    return '<span style="color:#62696D;font-size:12px;padding:4px 0;display:block">No lineup data yet.</span>';
+  return r.lineups.map(lu => {
+    const wr = lu.win_pct;
+    const icons = lu.agents.map(ag => {
+      const ad = S.agentData[ag];
+      const name = AGENT_DISPLAY[ag] || ag;
+      const role = AGENT_ROLE[ag];
+      const rc = role ? ROLE_COLOR[role] : '#2A2F38';
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;width:36px">
+        ${ad?.icon
+          ? `<img src="${ad.icon}" style="width:32px;height:32px;object-fit:cover;background:#1B1E24" title="${name}">`
+          : `<div style="width:32px;height:32px;background:#1B1E24;border:1px solid ${rc}"></div>`}
+        <span style="font-size:9px;color:#62696D;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center">${name}</span>
+      </div>`;
+    }).join('');
+    return `<div style="display:flex;align-items:center;gap:14px;padding:5px 0;border-bottom:1px solid #1B1E24">
+      <div style="display:flex;gap:3px">${icons}</div>
+      <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D;min-width:44px">${num(lu.total)} g</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:50px;height:3px;background:#262A32;flex:none">
+          <div style="height:3px;width:${barW(wr)};background:${wrColor(wr)}"></div>
+        </div>
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:${wrColor(wr)}">${wr.toFixed(1)}%</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function buildCompsTable(rows) {
   const COLS = [
-    { w:'44px',               label:'#' },
-    { w:'minmax(190px,1fr)',  label:'Archetype', sort:'comp',    asc:true },
-    { w:'80px',               label:'Matches',   sort:'total',   right:true },
-    { w:'168px',              label:'Win Rate',  sort:'win_pct', pl:true },
-    { w:'72px',               label:'Atk WR',    sort:'atk_wr',  right:true },
-    { w:'72px',               label:'Def WR',    sort:'def_wr',  right:true },
+    { w:'44px',              label:'#' },
+    { w:'minmax(190px,1fr)', label:'Archetype',     sort:'comp',       asc:true },
+    { w:'96px',              label:'Matches',        sort:'total',      right:true },
+    { w:'168px',             label:'Non-Mirror WR',  sort:'nm_win_pct', pl:true },
+    { w:'72px',              label:'Atk WR',         sort:'atk_wr',     right:true },
+    { w:'72px',              label:'Def WR',         sort:'def_wr',     right:true },
   ];
   const wrap = document.createElement('div');
   wrap.appendChild(hdrRow(COLS, 'comps'));
@@ -532,27 +687,46 @@ function buildCompsTable(rows) {
     return wrap;
   }
   rows.forEach((r, i) => {
-    const tierColor = r.win_pct >= 53 ? '#5B8DEF' : r.win_pct >= 50 ? '#3BB9C4' : '#262A32';
+    const wr    = r.nm_win_pct;
+    const tierColor = wr != null ? (wr >= 53 ? '#5B8DEF' : wr >= 50 ? '#3BB9C4' : '#262A32') : '#262A32';
+    const isOpen = S.expanded.has(r.comp);
     const el = document.createElement('div');
     el.className = 'row-hover';
-    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px`;
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid ${isOpen?'transparent':'#1B1E24'};height:34px;padding:0 14px;cursor:pointer;background:${isOpen?'#131519':''}`;
     el.innerHTML = `
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
       <div style="display:flex;align-items:center;gap:6px;overflow:hidden">
+        <span style="font-size:10px;color:#3A3F47;width:10px;flex:none">${isOpen?'▾':'▸'}</span>
         <span style="width:3px;height:14px;background:${tierColor};flex:none"></span>
         <div style="display:flex;gap:2px;flex:none">${archSquares(r.comp)}</div>
         <span style="font-size:12px;color:#E8E9EA;font-family:ui-monospace,'SF Mono',Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.comp}</span>
       </div>
-      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.total)}</div>
+      <div style="text-align:right">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8">${num(r.total)}</span>
+        ${r.mirror_matches>0?`<span style="font-family:ui-monospace,monospace;font-size:10px;color:#3A3F47;margin-left:4px">↻${num(r.mirror_matches)}</span>`:''}
+      </div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
-        <div style="width:70px;height:4px;background:#262A32;flex:none">
-          <div style="height:4px;width:${barW(r.win_pct)};background:${wrColor(r.win_pct)}"></div>
-        </div>
-        <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${r.win_pct.toFixed(1)}%</span>
+        ${wr!=null?`
+          <div style="width:70px;height:4px;background:#262A32;flex:none">
+            <div style="height:4px;width:${barW(wr)};background:${wrColor(wr)}"></div>
+          </div>
+          <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#E8E9EA">${wr.toFixed(1)}%</span>
+          <span style="font-size:10px;color:#62696D">(${r.win_pct.toFixed(1)} all)</span>
+        `:`<span style="font-family:ui-monospace,monospace;font-size:12px;color:#62696D">—</span>`}
       </div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.atk_wr!=null?wrColor(r.atk_wr):'#62696D'};text-align:right">${fmt(r.atk_wr)}</div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.def_wr!=null?wrColor(r.def_wr):'#62696D'};text-align:right">${fmt(r.def_wr)}</div>`;
+    el.onclick = () => {
+      S.expanded.has(r.comp) ? S.expanded.delete(r.comp) : S.expanded.add(r.comp);
+      renderMain();
+    };
     wrap.appendChild(el);
+    if (isOpen) {
+      const sub = document.createElement('div');
+      sub.style.cssText = 'background:#131519;border-bottom:1px solid #1B1E24;padding:10px 14px 14px 58px';
+      sub.innerHTML = buildAgentExpansion(r);
+      wrap.appendChild(sub);
+    }
   });
   return wrap;
 }
@@ -564,7 +738,7 @@ function buildAgentsTable(rows) {
     { w:'44px',               label:'#' },
     { w:'minmax(140px,1fr)',  label:'Agent',    sort:'name',    asc:true },
     { w:'120px',              label:'Role',     sort:'role',    asc:true },
-    { w:'90px',               label:'Pick %',   sort:'pick',    right:true },
+    { w:'90px',               label:'Team Pick%', sort:'pick',   right:true },
     { w:'180px',              label:'Win Rate', sort:'win_pct', pl:true }
   ];
   const wrap = document.createElement('div');
@@ -577,12 +751,17 @@ function buildAgentsTable(rows) {
     const rc = ROLE_COLOR[r.role] || '#62696D';
     const el = document.createElement('div');
     el.className = 'row-hover';
-    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px`;
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:38px;padding:0 14px`;
+    const ad = S.agentData[r.agent];
     el.innerHTML = `
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
-      <div style="font-size:13px;color:#E8E9EA">${r.name}</div>
-      <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:#9AA0A8">
-        <span style="width:6px;height:6px;background:${rc}"></span>${r.role}
+      <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
+        ${ad?.icon ? `<img src="${ad.icon}" style="width:28px;height:28px;object-fit:cover;flex:none;background:#1B1E24">` : ''}
+        <span style="font-size:13px;color:#E8E9EA">${r.name}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#9AA0A8">
+        ${ad?.roleIcon ? `<img src="${ad.roleIcon}" style="width:13px;height:13px;opacity:0.65">` : `<span style="width:6px;height:6px;background:${rc}"></span>`}
+        ${r.role}
       </div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${r.pick.toFixed(1)}%</div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
@@ -620,10 +799,14 @@ function buildMapsTable(rows) {
     const atkWr    = r.atk_wr;
     const el = document.createElement('div');
     el.className = 'row-hover';
-    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:34px;padding:0 14px;cursor:pointer`;
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;border-bottom:1px solid #1B1E24;height:38px;padding:0 14px;cursor:pointer`;
+    const mImg = S.mapData[r.name.toLowerCase()]?.listIcon;
     el.innerHTML = `
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11px;color:#62696D">${String(i+1).padStart(2,'0')}</div>
-      <div style="font-size:13px;color:#E8E9EA">${r.name}</div>
+      <div style="display:flex;align-items:center;gap:8px;overflow:hidden">
+        ${mImg ? `<img src="${mImg}" style="width:42px;height:24px;object-fit:cover;flex:none;opacity:0.8">` : ''}
+        <span style="font-size:13px;color:#E8E9EA">${r.name}</span>
+      </div>
       <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.matches)}</div>
       <div style="display:flex;align-items:center;gap:10px;padding-left:18px">
         ${atkWr != null ? `
@@ -663,7 +846,9 @@ function renderStatusBar() {
   };
 });
 
-document.getElementById('map-all-btn').onclick = () => { S.map = null; fetchData(); };
+document.getElementById('map-all-btn').onclick    = () => { S.map = null; fetchData(); };
+document.getElementById('season-all-btn').onclick = () => { S.availSeasons.forEach(s => delete S.seasons[s]); fetchData(); };
+document.getElementById('region-all-btn').onclick = () => { S.availRegions.forEach(r => delete S.regions[r]); fetchData(); };
 
 let _st;
 document.getElementById('search').oninput = e => {

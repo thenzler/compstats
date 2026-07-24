@@ -1,6 +1,6 @@
 """Database helpers — Postgres in production, SQLite locally."""
 from __future__ import annotations
-import json, os
+import json, os, re
 from pathlib import Path
 
 # ── Backend selection ─────────────────────────────────────────────────────────
@@ -36,6 +36,30 @@ def connect():
 def _q(sql: str) -> str:
     """Convert ? placeholders to %s for Postgres."""
     return sql.replace("?", "%s") if _USE_PG else sql
+
+
+# ── Metadata extraction (kept here to avoid circular imports with scraper) ─────
+
+_REGION_KEYS = [
+    ("americas","Americas"),("emea","EMEA"),("pacific","Pacific"),
+    ("china","China"),("japan","Japan"),("korea","Korea"),("brazil","Brazil"),
+    ("latam","LATAM"),("north america","NA"),("southeast asia","SEA"),
+    ("oceania","Oceania"),("south asia","South Asia"),
+]
+
+def _extract_season(event_name: str) -> str:
+    m = re.search(r"\b(20\d\d)\b", event_name)
+    return m.group(1) if m else "Unknown"
+
+def _extract_region(event_name: str) -> str:
+    low = event_name.lower()
+    if any(k in low for k in ("masters","champions","world cup","esports world cup")):
+        return "Global"
+    search_in = event_name.split(":",1)[1].strip().lower() if ":" in event_name else low
+    for key, region in _REGION_KEYS:
+        if key in search_in:
+            return region
+    return "Other"
 
 
 # ── Schema init ───────────────────────────────────────────────────────────────
@@ -82,12 +106,21 @@ def _init_pg(con) -> None:
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier)")
-        # Migration: add columns if they don't exist yet
         for col, typ in _ROUND_COLS:
             try:
                 cur.execute(f"ALTER TABLE map_results ADD COLUMN {col} {typ}")
             except Exception:
-                pass  # column already exists
+                pass
+        for col, typ in (("season","TEXT"),("region","TEXT")):
+            try:
+                cur.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
+            except Exception:
+                pass
+        # Backfill
+        cur.execute("SELECT id, event_name FROM matches WHERE season IS NULL")
+        for mid, name in cur.fetchall():
+            cur.execute("UPDATE matches SET season=%s, region=%s WHERE id=%s",
+                        (_extract_season(name), _extract_region(name), mid))
     con.commit()
 
 
@@ -108,11 +141,19 @@ def _init_sqlite(con) -> None:
     CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name);
     CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier);
     """)
-    # Migration: add columns to existing DB if missing
-    existing = {row[1] for row in con.execute("PRAGMA table_info(map_results)").fetchall()}
+    existing_mr = {row[1] for row in con.execute("PRAGMA table_info(map_results)").fetchall()}
     for col, typ in _ROUND_COLS:
-        if col not in existing:
+        if col not in existing_mr:
             con.execute(f"ALTER TABLE map_results ADD COLUMN {col} {typ}")
+    existing_m = {row[1] for row in con.execute("PRAGMA table_info(matches)").fetchall()}
+    for col, typ in (("season","TEXT"),("region","TEXT")):
+        if col not in existing_m:
+            con.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
+    # Backfill season/region for existing rows
+    rows = con.execute("SELECT id, event_name FROM matches WHERE season IS NULL").fetchall()
+    for mid, name in rows:
+        con.execute("UPDATE matches SET season=?, region=? WHERE id=?",
+                    (_extract_season(name), _extract_region(name), mid))
     con.commit()
 
 
@@ -145,12 +186,15 @@ def _round_vals(m: dict) -> tuple:
 
 
 def insert_match(con, match_id: str, event_name: str, tier: str,
-                 date: str, team_a: str, team_b: str, maps: list[dict]) -> None:
+                 date: str, team_a: str, team_b: str, maps: list[dict],
+                 season: str = "", region: str = "") -> None:
+    season = season or _extract_season(event_name)
+    region = region or _extract_region(event_name)
     if _USE_PG:
         with con.cursor() as cur:
             cur.execute(
-                "INSERT INTO matches VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
-                (match_id, event_name, tier, date, team_a, team_b)
+                "INSERT INTO matches VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+                (match_id, event_name, tier, date, team_a, team_b, season, region)
             )
             for m in maps:
                 cur.execute(
@@ -162,8 +206,8 @@ def insert_match(con, match_id: str, event_name: str, tier: str,
                      *_round_vals(m))
                 )
     else:
-        con.execute("INSERT OR IGNORE INTO matches VALUES (?,?,?,?,?,?)",
-                    (match_id, event_name, tier, date, team_a, team_b))
+        con.execute("INSERT OR IGNORE INTO matches VALUES (?,?,?,?,?,?,?,?)",
+                    (match_id, event_name, tier, date, team_a, team_b, season, region))
         for m in maps:
             con.execute(
                 """INSERT INTO map_results

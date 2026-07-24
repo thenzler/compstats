@@ -21,7 +21,7 @@ def _get(path: str) -> BeautifulSoup:
     return BeautifulSoup(r.text, "html.parser")
 
 
-# ── Tier classification ───────────────────────────────────────────────────────
+# ── Event metadata ────────────────────────────────────────────────────────────
 
 def classify_tier(event_name: str) -> str:
     name = event_name.upper()
@@ -29,6 +29,37 @@ def classify_tier(event_name: str) -> str:
     if "VCT" in name and "CHALLENGERS" not in name: return "T1"
     if "CHALLENGERS" in name:    return "T2"
     return "T3"
+
+
+_REGION_KEYS = [
+    ("americas",      "Americas"),
+    ("emea",          "EMEA"),
+    ("pacific",       "Pacific"),
+    ("china",         "China"),
+    ("japan",         "Japan"),
+    ("korea",         "Korea"),
+    ("brazil",        "Brazil"),
+    ("latam",         "LATAM"),
+    ("north america", "NA"),
+    ("southeast asia","SEA"),
+    ("oceania",       "Oceania"),
+    ("south asia",    "South Asia"),
+]
+
+def extract_season(event_name: str) -> str:
+    m = re.search(r"\b(20\d\d)\b", event_name)
+    return m.group(1) if m else "Unknown"
+
+def extract_region(event_name: str) -> str:
+    low = event_name.lower()
+    if any(k in low for k in ("masters", "champions", "world cup", "esports world cup")):
+        return "Global"
+    # prefer match after the colon (region is usually there for league events)
+    search_in = event_name.split(":", 1)[1].strip().lower() if ":" in event_name else low
+    for key, region in _REGION_KEYS:
+        if key in search_in:
+            return region
+    return "Other"
 
 
 # ── Round data parser ────────────────────────────────────────────────────────
@@ -173,6 +204,7 @@ def parse_match(match_id: str) -> dict | None:
         return None
 
     return dict(id=str(match_id), event_name=event_name, tier=tier,
+                season=extract_season(event_name), region=extract_region(event_name),
                 date=date, team_a=team_a, team_b=team_b, maps=maps)
 
 
@@ -192,20 +224,30 @@ def match_ids_for_event(event_id: str) -> list[str]:
 
 # ── Event listing ─────────────────────────────────────────────────────────────
 
-def event_ids(completed: bool = True) -> list[tuple[str, str]]:
-    """Return [(event_id, event_name)] from the VLR events page."""
-    path = "/events" + ("?series_id=all&status=0" if completed else "")
-    soup = _get(path)
+def event_ids(completed: bool = True, max_pages: int = 25) -> list[tuple[str, str]]:
+    """Return [(event_id, event_name)] across paginated VLR events pages."""
     results = []
-    for a in soup.select("a.event-item"):
-        href = a.get("href", "")
-        m = re.match(r"/event/(\d+)/", href)
-        if not m:
-            continue
-        eid = m.group(1)
-        name_el = a.select_one(".event-item-title")
-        name = name_el.get_text(strip=True) if name_el else ""
-        results.append((eid, name))
+    seen: set[str] = set()
+    base = "/events?series_id=all" + ("&status=0" if completed else "")
+    for page in range(1, max_pages + 1):
+        path = base if page == 1 else f"{base}&page={page}"
+        soup = _get(path)
+        new = 0
+        for a in soup.select("a.event-item"):
+            href = a.get("href", "")
+            m = re.match(r"/event/(\d+)/", href)
+            if not m:
+                continue
+            eid = m.group(1)
+            if eid in seen:
+                continue
+            seen.add(eid)
+            name_el = a.select_one(".event-item-title")
+            name = name_el.get_text(strip=True) if name_el else ""
+            results.append((eid, name))
+            new += 1
+        if not new:
+            break
     return results
 
 
@@ -225,6 +267,9 @@ if __name__ == "__main__":
     p_event.add_argument("event_id")
 
     p_events = sub.add_parser("events", help="List recent events")
+    p_bulk = sub.add_parser("bulk", help="Scrape multiple event IDs (space-separated or --file)")
+    p_bulk.add_argument("event_ids", nargs="*", metavar="EVENT_ID")
+    p_bulk.add_argument("--file", help="Text file with one event ID per line")
     sub.add_parser("refresh-rounds", help="Backfill atk/def round data for all scraped matches")
 
     args = parser.parse_args()
@@ -255,6 +300,29 @@ if __name__ == "__main__":
     elif args.cmd == "events":
         for eid, name in event_ids():
             print(f"{eid:>8}  {classify_tier(name):3}  {name}")
+
+    elif args.cmd == "bulk":
+        eids = list(args.event_ids)
+        if args.file:
+            with open(args.file) as f:
+                eids += [l.strip() for l in f if l.strip() and not l.startswith("#")]
+        if not eids:
+            print("No event IDs provided. Pass IDs as arguments or use --file.")
+        total_new = 0
+        for eid in eids:
+            match_list = match_ids_for_event(eid)
+            new = 0
+            for mid in match_list:
+                if db.already_scraped(con, mid):
+                    continue
+                result = parse_match(mid)
+                if result:
+                    db.insert_match(con, match_id=result["id"], **{k: result[k] for k in result if k not in ("maps","id")}, maps=result["maps"])
+                    new += 1
+            print(f"  event {eid}: +{new}/{len(match_list)} matches")
+            total_new += new
+        n = con.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+        print(f"Done. +{total_new} new. DB total: {n} matches")
 
     elif args.cmd == "refresh-rounds":
         rows = con.execute("SELECT id FROM matches").fetchall()

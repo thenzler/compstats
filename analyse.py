@@ -25,21 +25,29 @@ def classify_comp(agents: list[str]) -> str:
     return f"{s}s-{d}d-{i}i-{c}c"
 
 
-def _build_clause(tiers, map_name):
+def _build_clause(tiers, map_name, seasons=None, regions=None):
     params = []
-    tier_clause = map_clause = ""
+    clauses = []
     if tiers:
-        tier_clause = f"AND m.tier IN ({','.join(['?']*len(tiers))})"
+        clauses.append(f"m.tier IN ({','.join(['?']*len(tiers))})")
         params.extend(tiers)
+    if seasons:
+        clauses.append(f"m.season IN ({','.join(['?']*len(seasons))})")
+        params.extend(seasons)
+    if regions:
+        clauses.append(f"m.region IN ({','.join(['?']*len(regions))})")
+        params.extend(regions)
+    tier_clause = (" AND " + " AND ".join(clauses)) if clauses else ""
+    map_clause = ""
     if map_name:
         map_clause = "AND mr.map_name = ?"
         params.append(map_name)
     return tier_clause, map_clause, params
 
 
-def comp_winrates(map_name=None, tiers=None):
+def comp_winrates(map_name=None, tiers=None, seasons=None, regions=None):
     con = db.connect()
-    tier_clause, map_clause, params = _build_clause(tiers, map_name)
+    tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)
     rows = db.fetchall(con, f"""
         SELECT mr.map_name, mr.agents_a, mr.agents_b, mr.winner,
                mr.a_atk_wins, mr.a_def_wins, mr.b_atk_wins, mr.b_def_wins
@@ -47,8 +55,10 @@ def comp_winrates(map_name=None, tiers=None):
         WHERE 1=1 {tier_clause} {map_clause}
     """, params)
 
-    # [wins, total, atk_wins, atk_rounds, def_wins, def_rounds]
-    stats: dict[tuple, list] = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
+    # [wins, total, atk_wins, atk_rounds, def_wins, def_rounds, nm_wins, nm_total]
+    stats: dict[tuple, list] = defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0, 0])
+    agent_counts: dict[tuple, dict] = defaultdict(lambda: defaultdict(int))
+    lineup_stats: dict[tuple, dict] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
 
     for row in rows:
         d = dict(row)
@@ -58,9 +68,15 @@ def comp_winrates(map_name=None, tiers=None):
         b_def = d.get("b_def_wins") or 0
         have_rounds = (a_atk + a_def + b_atk + b_def) > 0
 
-        for side, winner in [("agents_a", "A"), ("agents_b", "B")]:
-            agents = json.loads(d[side])
-            comp = classify_comp(agents)
+        agents_a = json.loads(d["agents_a"])
+        agents_b = json.loads(d["agents_b"])
+        comp_a = classify_comp(agents_a)
+        comp_b = classify_comp(agents_b)
+
+        for side, winner, agents, comp, opp in [
+            ("agents_a", "A", agents_a, comp_a, comp_b),
+            ("agents_b", "B", agents_b, comp_b, comp_a),
+        ]:
             key = (comp, d["map_name"])
             s = stats[key]
             s[1] += 1
@@ -69,33 +85,53 @@ def comp_winrates(map_name=None, tiers=None):
 
             if have_rounds:
                 if side == "agents_a":
-                    # A played atk for a_atk+b_def rounds, def for a_def+b_atk rounds
-                    s[2] += a_atk
-                    s[3] += a_atk + b_def
-                    s[4] += a_def
-                    s[5] += a_def + b_atk
+                    s[2] += a_atk;       s[3] += a_atk + b_def
+                    s[4] += a_def;       s[5] += a_def + b_atk
                 else:
-                    s[2] += b_atk
-                    s[3] += b_atk + a_def
-                    s[4] += b_def
-                    s[5] += b_def + a_atk
+                    s[2] += b_atk;       s[3] += b_atk + a_def
+                    s[4] += b_def;       s[5] += b_def + a_atk
+
+            if comp != opp:
+                s[7] += 1
+                if d["winner"] == winner:
+                    s[6] += 1
+
+            for agent in agents:
+                agent_counts[key][agent] += 1
+
+            lineup = tuple(sorted(agents))
+            lineup_stats[key][lineup][1] += 1
+            if d["winner"] == winner:
+                lineup_stats[key][lineup][0] += 1
 
     result = []
-    for (comp, map_n), (wins, total, atk_w, atk_r, def_w, def_r) in stats.items():
+    for (comp, map_n), s in stats.items():
+        wins, total, atk_w, atk_r, def_w, def_r, nm_wins, nm_total = s
         result.append({
             "comp": comp, "map": map_n, "wins": wins, "total": total,
-            "win_pct":   round(wins / total * 100, 1) if total else 0,
-            "atk_wins":  atk_w,  "atk_rounds": atk_r,
-            "def_wins":  def_w,  "def_rounds":  def_r,
-            "atk_wr":    round(atk_w / atk_r * 100, 1) if atk_r else None,
-            "def_wr":    round(def_w / def_r * 100, 1) if def_r else None,
+            "win_pct":    round(wins / total * 100, 1) if total else 0,
+            "atk_wins":   atk_w,  "atk_rounds": atk_r,
+            "def_wins":   def_w,  "def_rounds":  def_r,
+            "atk_wr":     round(atk_w / atk_r * 100, 1) if atk_r else None,
+            "def_wr":     round(def_w / def_r * 100, 1) if def_r else None,
+            "nm_total":   nm_total,
+            "nm_wins":    nm_wins,
+            "nm_win_pct": round(nm_wins / nm_total * 100, 1) if nm_total else None,
+            "mirror_matches": (total - nm_total) // 2,
+            "agents":     dict(sorted(agent_counts[(comp, map_n)].items(), key=lambda x: -x[1])),
+            "lineups":    sorted(
+                [{"agents": list(lu), "wins": w, "total": t,
+                  "win_pct": round(w / t * 100, 1) if t else 0}
+                 for lu, (w, t) in lineup_stats[(comp, map_n)].items()],
+                key=lambda x: -x["total"]
+            )[:10],
         })
     return sorted(result, key=lambda r: -r["total"])
 
 
-def agent_pickrates(map_name=None, tiers=None):
+def agent_pickrates(map_name=None, tiers=None, seasons=None, regions=None):
     con = db.connect()
-    tier_clause, map_clause, params = _build_clause(tiers, map_name)
+    tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)
     rows = db.fetchall(con, f"""
         SELECT mr.map_name, mr.agents_a, mr.agents_b, mr.winner
         FROM map_results mr JOIN matches m ON m.id = mr.match_id
@@ -120,10 +156,10 @@ def agent_pickrates(map_name=None, tiers=None):
     return sorted(result, key=lambda r: -r["picks"])
 
 
-def map_meta_stats(tiers=None):
+def map_meta_stats(tiers=None, seasons=None, regions=None):
     """Per-map: total, avg_rounds, atk_wr, pistol_atk_wr, a_wins."""
     con = db.connect()
-    tier_clause, _, params = _build_clause(tiers, None)
+    tier_clause, _, params = _build_clause(tiers, None, seasons, regions)
     rows = db.fetchall(con, f"""
         SELECT mr.map_name, mr.winner,
                mr.score_a, mr.score_b,

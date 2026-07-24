@@ -64,33 +64,44 @@ def maps_list(tiers: str = ""):
     return JSONResponse([r[0] for r in rows])
 
 
+def _lst(s: str):
+    return [x.strip() for x in s.split(",") if x.strip()] or None
+
+
+@app.get("/api/filters")
+def filters():
+    con = db.connect()
+    seasons = [r[0] for r in con.execute(
+        "SELECT DISTINCT season FROM matches WHERE season IS NOT NULL ORDER BY season DESC"
+    ).fetchall()]
+    regions = [r[0] for r in con.execute(
+        "SELECT DISTINCT region FROM matches WHERE region IS NOT NULL ORDER BY region"
+    ).fetchall()]
+    return JSONResponse({"seasons": seasons, "regions": regions})
+
+
 @app.get("/api/comps")
-def comps(map: str = "", tiers: str = "", min_sample: int = 10):
-    tier_list = [t.strip() for t in tiers.split(",") if t.strip()] or None
+def comps(map: str = "", tiers: str = "", seasons: str = "", regions: str = "", min_sample: int = 10):
     rows = analyse.comp_winrates(
-        map_name=map or None,
-        tiers=tier_list
+        map_name=map or None, tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions)
     )
     rows = [r for r in rows if r["total"] >= min_sample]
     return JSONResponse(rows)
 
 
 @app.get("/api/agents")
-def agents(map: str = "", tiers: str = "", min_sample: int = 5):
-    tier_list = [t.strip() for t in tiers.split(",") if t.strip()] or None
+def agents(map: str = "", tiers: str = "", seasons: str = "", regions: str = "", min_sample: int = 5):
     rows = analyse.agent_pickrates(
-        map_name=map or None,
-        tiers=tier_list
+        map_name=map or None, tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions)
     )
     rows = [r for r in rows if r["picks"] >= min_sample]
     return JSONResponse(rows)
 
 
 @app.get("/api/maps/meta")
-def maps_meta(tiers: str = ""):
+def maps_meta(tiers: str = "", seasons: str = "", regions: str = ""):
     """Per-map stats: total, avg_rounds, atk_wr, pistol_atk_wr."""
-    tier_list = [t.strip() for t in tiers.split(",") if t.strip()] or None
-    rows = analyse.map_meta_stats(tiers=tier_list)
+    rows = analyse.map_meta_stats(tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions))
     return JSONResponse(rows)
 
 
