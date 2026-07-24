@@ -106,6 +106,20 @@ def _init_pg(con) -> None:
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier)")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS teams (
+            name     TEXT PRIMARY KEY,
+            logo_url TEXT
+        )""")
+        # Idempotent unique constraint on map_results
+        cur.execute("""
+        DO $$ BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'uniq_match_map'
+          ) THEN
+            ALTER TABLE map_results ADD CONSTRAINT uniq_match_map UNIQUE (match_id, map_name);
+          END IF;
+        END $$""")
         con.commit()
         # Add columns that may not exist yet — each in its own savepoint to avoid aborting the tx
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='map_results'")
@@ -139,7 +153,12 @@ def _init_sqlite(con) -> None:
         score_a INTEGER, score_b INTEGER,
         a_atk_wins INTEGER, a_def_wins INTEGER,
         b_atk_wins INTEGER, b_def_wins INTEGER,
-        pistol1_atk INTEGER, pistol2_atk INTEGER
+        pistol1_atk INTEGER, pistol2_atk INTEGER,
+        UNIQUE(match_id, map_name)
+    );
+    CREATE TABLE IF NOT EXISTS teams (
+        name TEXT PRIMARY KEY,
+        logo_url TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_mr_map  ON map_results(map_name);
     CREATE INDEX IF NOT EXISTS idx_m_tier  ON matches(tier);
@@ -188,9 +207,26 @@ def _round_vals(m: dict) -> tuple:
     )
 
 
+def upsert_team_logo(con, name: str, logo_url: str) -> None:
+    if not name or not logo_url:
+        return
+    if _USE_PG:
+        with con.cursor() as cur:
+            cur.execute(
+                "INSERT INTO teams (name, logo_url) VALUES (%s,%s) ON CONFLICT (name) DO UPDATE SET logo_url=EXCLUDED.logo_url",
+                (name, logo_url)
+            )
+    else:
+        con.execute(
+            "INSERT OR REPLACE INTO teams (name, logo_url) VALUES (?,?)",
+            (name, logo_url)
+        )
+
+
 def insert_match(con, match_id: str, event_name: str, tier: str,
                  date: str, team_a: str, team_b: str, maps: list[dict],
-                 season: str = "", region: str = "") -> None:
+                 season: str = "", region: str = "",
+                 logo_a: str = "", logo_b: str = "") -> None:
     season = season or _extract_season(event_name)
     region = region or _extract_region(event_name)
     if _USE_PG:
@@ -204,7 +240,8 @@ def insert_match(con, match_id: str, event_name: str, tier: str,
                     """INSERT INTO map_results
                        (match_id,map_name,agents_a,agents_b,winner,
                         score_a,score_b,a_atk_wins,a_def_wins,b_atk_wins,b_def_wins,pistol1_atk,pistol2_atk)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (match_id,map_name) DO NOTHING""",
                     (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"],
                      *_round_vals(m))
                 )
@@ -213,13 +250,15 @@ def insert_match(con, match_id: str, event_name: str, tier: str,
                     (match_id, event_name, tier, date, team_a, team_b, season, region))
         for m in maps:
             con.execute(
-                """INSERT INTO map_results
+                """INSERT OR IGNORE INTO map_results
                    (match_id,map_name,agents_a,agents_b,winner,
                     score_a,score_b,a_atk_wins,a_def_wins,b_atk_wins,b_def_wins,pistol1_atk,pistol2_atk)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (match_id, m["map"], json.dumps(m["agents_a"]), json.dumps(m["agents_b"]), m["winner"],
                  *_round_vals(m))
             )
+    if logo_a: upsert_team_logo(con, team_a, logo_a)
+    if logo_b: upsert_team_logo(con, team_b, logo_b)
     con.commit()
 
 

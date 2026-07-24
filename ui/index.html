@@ -142,10 +142,10 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const TIERS = [
-  { key:'T1', label:'T1', dot:'#5B8DEF' },
-  { key:'T2', label:'T2', dot:'#3BB9C4' },
-  { key:'T3', label:'T3', dot:'#9AA0A8' },
-  { key:'GC', label:'GC', dot:'#9B66D8' }
+  { key:'T1', label:'VCT International', short:'T1', color:'#FF4655', bg:'#2A1217' },
+  { key:'T2', label:'VCT Challengers',   short:'T2', color:'#009BDE', bg:'#0D1E2A' },
+  { key:'T3', label:'Tier 3',            short:'T3', color:'#9AA0A8', bg:'#1B1E24' },
+  { key:'GC', label:'Game Changers',     short:'GC', color:'#C67DFF', bg:'#211530' }
 ];
 
 const ROLE_COLOR = {
@@ -198,6 +198,7 @@ const S = {
   agentData: {},
   mapData: {},
   roleData: {},
+  teamLogos: {},
   expanded: new Set(),
   seasons: {},   // { "2026": true, ... } — all true by default after load
   regions: {},   // { "Americas": true, ... }
@@ -359,6 +360,13 @@ async function loadFilters() {
   } catch(e) { console.warn('filters unavailable', e); }
 }
 
+async function loadTeamLogos() {
+  try {
+    const res = await fetch('/api/teams');
+    S.teamLogos = await res.json();
+  } catch(e) { console.warn('team logos unavailable', e); }
+}
+
 async function fetchData() {
   const tiers   = encodeURIComponent(tierParam());
   const seasons = encodeURIComponent(seasonParam());
@@ -367,7 +375,7 @@ async function fetchData() {
   setStatus('dim', 'loading…');
 
   try {
-    await Promise.all([loadValApiData(), loadFilters()]);
+    await Promise.all([loadValApiData(), loadFilters(), loadTeamLogos()]);
     const [cRes, aRes, mRes, sRes] = await Promise.all([
       fetch(`/api/comps?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
       fetch(`/api/agents?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
@@ -417,14 +425,16 @@ function renderSidebar() {
     const on = S.tiers[t.key];
     const el = document.createElement('div');
     el.className = 'pill';
-    el.style.cssText = `display:flex;align-items:center;gap:6px;padding:4px 9px;font-size:12px;border:1px solid ${on?'#3A3F47':'#1E2127'};background:${on?'#1B1E24':'transparent'};color:${on?'#E8E9EA':'#62696D'}`;
-    el.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${on?t.dot:'#3A3F47'}"></span>${t.label}`;
+    el.style.cssText = `display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12px;border:1px solid ${on ? t.color + '55' : '#1E2127'};background:${on ? t.bg : 'transparent'};color:${on ? '#E8E9EA' : '#62696D'};cursor:pointer`;
+    el.innerHTML = `<span style="width:7px;height:7px;border-radius:1px;background:${on ? t.color : '#3A3F47'};flex:none"></span>
+      <span style="font-weight:600;font-size:10px;color:${on ? t.color : '#62696D'};letter-spacing:.06em;min-width:20px">${t.short}</span>
+      <span style="font-size:11px;color:${on ? '#9AA0A8' : '#3A3F47'}">${t.label}</span>`;
     el.onclick = () => { S.tiers[t.key] = !S.tiers[t.key]; fetchData(); };
     pills.appendChild(el);
   });
   const active = activeTiers();
   document.getElementById('tier-summary').textContent = active.length
-    ? active.map(t => t.key).join('+') + ' · ' + num(S.totalMatches) + ' matches'
+    ? active.map(t => t.short).join('+') + ' · ' + num(S.totalMatches) + ' matches'
     : 'no tiers selected';
 
   // Season pills
@@ -678,10 +688,15 @@ function buildAgentExpansion(r) {
   }).join('') : '<span style="color:#62696D;font-size:12px">No lineup data yet.</span>');
 
   const teamsHtml = (r.teams?.length ? `
-    <div style="margin-top:10px">
-      <div style="font-size:10px;font-weight:600;color:#62696D;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px">Teams</div>
-      ${r.teams.map(tm => `
-        <div style="display:flex;align-items:center;gap:10px;padding:3px 0;border-bottom:1px solid #1B1E2444">
+    <div style="margin-top:12px">
+      <div style="font-size:10px;font-weight:600;color:#62696D;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px">Team Track Record</div>
+      ${r.teams.map(tm => {
+        const logo = S.teamLogos[tm.team];
+        const logoEl = logo
+          ? `<img src="${logo}" style="width:22px;height:22px;object-fit:contain;border-radius:2px;background:#0B0C0E" onerror="this.style.display='none'">`
+          : `<div style="width:22px;height:22px;background:#1B1E24;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#62696D">${tm.team.slice(0,2).toUpperCase()}</div>`;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid #1B1E2444">
+          ${logoEl}
           <span style="font-size:12px;color:#C9D1D9;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tm.team}</span>
           <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D;white-space:nowrap">${tm.wins}W–${tm.total - tm.wins}L</span>
           <div style="display:flex;align-items:center;gap:6px;flex:none">
@@ -690,7 +705,8 @@ function buildAgentExpansion(r) {
             </div>
             <span style="font-family:ui-monospace,monospace;font-size:11px;color:${wrColor(tm.win_pct)};width:38px;text-align:right">${tm.win_pct.toFixed(1)}%</span>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>` : '');
 
   return lineupHtml + teamsHtml;

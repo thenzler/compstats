@@ -78,6 +78,13 @@ def filters():
     return JSONResponse({"seasons": seasons, "regions": regions})
 
 
+@app.get("/api/teams")
+def teams_logos():
+    con = db.connect()
+    rows = db.fetchall(con, "SELECT name, logo_url FROM teams WHERE logo_url IS NOT NULL AND logo_url != ''")
+    return JSONResponse({r["name"]: r["logo_url"] for r in rows})
+
+
 @app.get("/api/comps")
 def comps(map: str = "", tiers: str = "", seasons: str = "", regions: str = "", min_sample: int = 10):
     rows = analyse.comp_winrates(

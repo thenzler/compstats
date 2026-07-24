@@ -154,12 +154,22 @@ def parse_match(match_id: str) -> dict | None:
     date_el = soup.select_one(".match-header-date .moment-tz-convert")
     date = date_el.get("data-utc-ts", "") if date_el else ""
 
-    # ── Team names (left=A, right=B)
-    team_els = soup.select(".match-header-vs .wf-title-med")
-    teams = [el.get_text(strip=True) for el in team_els]
+    # ── Team names + logos (left=A, right=B)
+    team_links = soup.select(".match-header-link")
+    teams = [el.get_text(strip=True) for el in soup.select(".match-header-vs .wf-title-med")]
     if len(teams) < 2:
         return None
     team_a, team_b = teams[0], teams[1]
+
+    def _logo(link_el) -> str:
+        img = link_el.select_one("img") if link_el else None
+        if not img:
+            return ""
+        src = img.get("src", "")
+        return ("https:" + src) if src.startswith("//") else src
+
+    logo_a = _logo(team_links[0]) if len(team_links) >= 1 else ""
+    logo_b = _logo(team_links[1]) if len(team_links) >= 2 else ""
 
     # ── Per-map data
     maps = []
@@ -205,7 +215,8 @@ def parse_match(match_id: str) -> dict | None:
 
     return dict(id=str(match_id), event_name=event_name, tier=tier,
                 season=extract_season(event_name), region=extract_region(event_name),
-                date=date, team_a=team_a, team_b=team_b, maps=maps)
+                date=date, team_a=team_a, team_b=team_b,
+                logo_a=logo_a, logo_b=logo_b, maps=maps)
 
 
 # ── Event match list ──────────────────────────────────────────────────────────
