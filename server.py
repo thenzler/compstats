@@ -35,14 +35,32 @@ def index():
 
 
 @app.get("/api/stats")
-def stats():
+def stats(tiers: str = "", seasons: str = "", regions: str = ""):
     con = db.connect()
-    n_matches = db.fetchone(con, "SELECT COUNT(*) as n FROM matches")["n"]
-    n_maps    = db.fetchone(con, "SELECT COUNT(*) as n FROM map_results")["n"]
-    tiers     = [dict(r) for r in db.fetchall(con,
-        "SELECT tier, COUNT(*) as n FROM matches GROUP BY tier ORDER BY tier"
-    )]
-    return JSONResponse({"matches": n_matches, "map_results": n_maps, "tiers": tiers})
+    tier_l = _lst(tiers); season_l = _lst(seasons); region_l = _lst(regions)
+    # build clauses for matches table (no prefix) and for join queries (m. prefix)
+    bare, prefixed, params = [], [], []
+    if tier_l:
+        ph = ','.join(['?'] * len(tier_l))
+        bare.append(f"tier IN ({ph})"); prefixed.append(f"m.tier IN ({ph})")
+        params.extend(tier_l)
+    if season_l:
+        ph = ','.join(['?'] * len(season_l))
+        bare.append(f"season IN ({ph})"); prefixed.append(f"m.season IN ({ph})")
+        params.extend(season_l)
+    if region_l:
+        ph = ','.join(['?'] * len(region_l))
+        bare.append(f"region IN ({ph})"); prefixed.append(f"m.region IN ({ph})")
+        params.extend(region_l)
+    m_where  = ("WHERE " + " AND ".join(bare))      if bare      else ""
+    mr_where = ("WHERE " + " AND ".join(prefixed))  if prefixed  else ""
+    n_matches = db.fetchone(con, f"SELECT COUNT(*) as n FROM matches {m_where}", params)["n"]
+    n_maps    = db.fetchone(con,
+        f"SELECT COUNT(*) as n FROM map_results mr JOIN matches m ON m.id=mr.match_id {mr_where}",
+        params)["n"]
+    tier_rows = [dict(r) for r in db.fetchall(con,
+        f"SELECT tier, COUNT(*) as n FROM matches {m_where} GROUP BY tier ORDER BY tier", params)]
+    return JSONResponse({"matches": n_matches, "map_results": n_maps, "tiers": tier_rows})
 
 
 @app.get("/api/maps/list")

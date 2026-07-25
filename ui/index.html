@@ -391,7 +391,7 @@ async function fetchData() {
       fetch(`/api/comps?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
       fetch(`/api/agents?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
       fetch(`/api/maps/meta?tiers=${tiers}&seasons=${seasons}&regions=${regions}`),
-      fetch('/api/stats')
+      fetch(`/api/stats?tiers=${tiers}&seasons=${seasons}&regions=${regions}`)
     ]);
 
     S.rawComps  = await cRes.json();
