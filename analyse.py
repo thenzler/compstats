@@ -204,6 +204,196 @@ def agent_pickrates(map_name=None, tiers=None, seasons=None, regions=None):
     return sorted(result, key=lambda r: -r["picks"])
 
 
+def team_stats(team_name: str, tiers=None, seasons=None, regions=None):
+    """All maps played by a team: comp used, map, win/loss, agents, opponent."""
+    con = db.connect()
+    tier_clause, _, params_t = _build_clause(tiers, None, seasons, regions)
+    rows = db.fetchall(con, f"""
+        SELECT mr.map_name, mr.agents_a, mr.agents_b, mr.winner,
+               m.team_a, m.team_b, m.event_name, m.tier, m.date, m.id as match_id,
+               mr.a_atk_wins, mr.a_def_wins, mr.b_atk_wins, mr.b_def_wins
+        FROM map_results mr JOIN matches m ON m.id = mr.match_id
+        WHERE (m.team_a = ? OR m.team_b = ?) {tier_clause}
+        ORDER BY m.date DESC
+    """, [team_name, team_name] + params_t)
+
+    maps = []
+    agent_counts = defaultdict(int)
+    comp_counts  = defaultdict(lambda: [0, 0])  # comp -> [wins, total]
+    map_counts   = defaultdict(lambda: [0, 0])  # map  -> [wins, total]
+
+    for row in rows:
+        d = dict(row)
+        is_a = d["team_a"] == team_name
+        side  = "A" if is_a else "B"
+        opp   = d["team_b"] if is_a else d["team_a"]
+        won   = d["winner"] == side
+        agents = json.loads(d["agents_a"] if is_a else d["agents_b"])
+        comp   = classify_comp(agents)
+
+        for ag in agents:
+            agent_counts[ag] += 1
+        comp_counts[comp][1]      += 1
+        if won: comp_counts[comp][0] += 1
+        map_counts[d["map_name"]][1]      += 1
+        if won: map_counts[d["map_name"]][0] += 1
+
+        atk_w = (d["a_atk_wins"] or 0) if is_a else (d["b_atk_wins"] or 0)
+        def_w = (d["a_def_wins"] or 0) if is_a else (d["b_def_wins"] or 0)
+
+        maps.append({
+            "match_id":  d["match_id"],
+            "map":       d["map_name"],
+            "event":     d["event_name"],
+            "tier":      d["tier"],
+            "date":      d["date"],
+            "opponent":  opp,
+            "comp":      comp,
+            "agents":    agents,
+            "won":       won,
+            "atk_wins":  atk_w,
+            "def_wins":  def_w,
+        })
+
+    total = len(maps)
+    wins  = sum(1 for m in maps if m["won"])
+    return {
+        "team":     team_name,
+        "total":    total,
+        "wins":     wins,
+        "win_pct":  round(wins / total * 100, 1) if total else 0,
+        "maps_played": [
+            {"map": mn, "wins": s[0], "total": s[1],
+             "win_pct": round(s[0]/s[1]*100,1) if s[1] else 0}
+            for mn, s in sorted(map_counts.items(), key=lambda x: -x[1][1])
+        ],
+        "comps": [
+            {"comp": c, "wins": s[0], "total": s[1],
+             "win_pct": round(s[0]/s[1]*100,1) if s[1] else 0}
+            for c, s in sorted(comp_counts.items(), key=lambda x: -x[1][1])
+        ],
+        "agents": dict(sorted(agent_counts.items(), key=lambda x: -x[1])),
+        "recent_maps": maps[:40],
+    }
+
+
+def agent_synergy(map_name=None, tiers=None, seasons=None, regions=None):
+    """Co-occurrence and win rate for every agent pair."""
+    con = db.connect()
+    tier_clause, map_clause, params = _build_clause(tiers, map_name, seasons, regions)
+    rows = db.fetchall(con, f"""
+        SELECT mr.agents_a, mr.agents_b, mr.winner
+        FROM map_results mr JOIN matches m ON m.id = mr.match_id
+        WHERE 1=1 {tier_clause} {map_clause}
+    """, params)
+
+    pairs: dict[tuple, list] = defaultdict(lambda: [0, 0])
+    for row in rows:
+        d = dict(row)
+        for side, winner in [("agents_a", "A"), ("agents_b", "B")]:
+            agents = json.loads(d[side])
+            won = d["winner"] == winner
+            for i in range(len(agents)):
+                for j in range(i + 1, len(agents)):
+                    pair = tuple(sorted([agents[i], agents[j]]))
+                    pairs[pair][1] += 1
+                    if won:
+                        pairs[pair][0] += 1
+
+    result = []
+    for (a1, a2), (w, t) in pairs.items():
+        if t < 5:
+            continue
+        result.append({
+            "a1": a1, "a2": a2,
+            "picks": t, "wins": w,
+            "win_pct": round(w / t * 100, 1) if t else 0
+        })
+    return sorted(result, key=lambda x: -x["picks"])
+
+
+def comp_trends(tiers=None, seasons=None, regions=None):
+    """Weekly pick rate and win rate for each comp. Returns last 12 weeks."""
+    import re as _re
+    con = db.connect()
+    tier_clause, _, params = _build_clause(tiers, None, seasons, regions)
+    rows = db.fetchall(con, f"""
+        SELECT mr.agents_a, mr.agents_b, mr.winner, m.date
+        FROM map_results mr JOIN matches m ON m.id = mr.match_id
+        WHERE m.date IS NOT NULL AND m.date != '' {tier_clause}
+        ORDER BY m.date
+    """, params)
+
+    week_totals: dict[str, int] = defaultdict(int)
+    week_comp: dict[str, dict] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+
+    for row in rows:
+        d = dict(row)
+        date_str = str(d["date"] or "")[:10]
+        if not _re.match(r"\d{4}-\d{2}-\d{2}", date_str):
+            continue
+        from datetime import date as _date
+        try:
+            dt = _date.fromisoformat(date_str)
+        except Exception:
+            continue
+        week = f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}"
+
+        for side, winner in [("agents_a", "A"), ("agents_b", "B")]:
+            agents = json.loads(d[side])
+            comp = classify_comp(agents)
+            won = d["winner"] == winner
+            week_totals[week] += 1
+            week_comp[week][comp][1] += 1
+            if won:
+                week_comp[week][comp][0] += 1
+
+    all_comp_totals: dict[str, int] = defaultdict(int)
+    for week, comps in week_comp.items():
+        for comp, (w, t) in comps.items():
+            all_comp_totals[comp] += t
+    top_comps = [c for c, _ in sorted(all_comp_totals.items(), key=lambda x: -x[1])[:10]]
+
+    weeks = sorted(week_totals.keys())[-12:]
+    return {
+        "weeks": weeks,
+        "comps": [
+            {
+                "comp": comp,
+                "data": [
+                    {
+                        "week": w,
+                        "pick_rate": round(week_comp[w][comp][1] / week_totals[w] * 100, 1) if week_totals[w] else 0,
+                        "win_pct":   round(week_comp[w][comp][0] / week_comp[w][comp][1] * 100, 1) if week_comp[w][comp][1] else None,
+                        "total":     week_comp[w][comp][1],
+                    }
+                    for w in weeks
+                ]
+            }
+            for comp in top_comps
+        ]
+    }
+
+
+def team_search(query: str, limit: int = 15):
+    """Find team names matching a query string."""
+    con = db.connect()
+    like = f"%{query}%"
+    try:
+        rows = db.fetchall(con,
+            "SELECT DISTINCT team_a as name FROM matches WHERE team_a ILIKE ? "
+            "UNION SELECT DISTINCT team_b as name FROM matches WHERE team_b ILIKE ? "
+            "ORDER BY name LIMIT ?",
+            [like, like, limit])
+    except Exception:
+        rows = db.fetchall(con,
+            "SELECT DISTINCT team_a as name FROM matches WHERE LOWER(team_a) LIKE LOWER(?) "
+            "UNION SELECT DISTINCT team_b as name FROM matches WHERE LOWER(team_b) LIKE LOWER(?) "
+            "ORDER BY name LIMIT ?",
+            [like, like, limit])
+    return [r["name"] for r in rows]
+
+
 def map_meta_stats(tiers=None, seasons=None, regions=None):
     """Per-map: total, avg_rounds, atk_wr, pistol_atk_wr, a_wins."""
     con = db.connect()

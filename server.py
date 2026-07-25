@@ -134,6 +134,28 @@ def maps_meta(tiers: str = "", seasons: str = "", regions: str = ""):
     return JSONResponse(rows)
 
 
+@app.get("/api/team")
+def team_ep(name: str, tiers: str = "", seasons: str = "", regions: str = ""):
+    result = analyse.team_stats(name, tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions))
+    return JSONResponse(result)
+
+@app.get("/api/team/search")
+def team_search_ep(q: str = ""):
+    if len(q) < 2:
+        return JSONResponse([])
+    return JSONResponse(analyse.team_search(q))
+
+@app.get("/api/synergy")
+def synergy_ep(map: str = "", tiers: str = "", seasons: str = "", regions: str = ""):
+    rows = analyse.agent_synergy(map_name=map or None, tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions))
+    return JSONResponse(rows)
+
+@app.get("/api/trends")
+def trends_ep(tiers: str = "", seasons: str = "", regions: str = ""):
+    data = analyse.comp_trends(tiers=_lst(tiers), seasons=_lst(seasons), regions=_lst(regions))
+    return JSONResponse(data)
+
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8003))
