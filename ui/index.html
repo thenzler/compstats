@@ -23,6 +23,12 @@
   ::-webkit-scrollbar-track{background:#0B0C0E}
   ::-webkit-scrollbar-thumb{background:#262A32}
   ::-webkit-scrollbar-thumb:hover{background:#3A3F47}
+  @media (max-width: 768px) {
+    #sidebar { width: 100% !important; border-right: none !important; border-bottom: 1px solid #262A32; max-height: 180px; overflow-y: auto; }
+    #main-layout { flex-direction: column !important; }
+    .tab-btn { padding: 0 8px !important; font-size: 11px !important; }
+    #header-search { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -42,7 +48,7 @@
       <span id="hdr-maps" title="Total map results in database" style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:#9AA0A8;background:#1B1E24;border:1px solid #262A32;padding:2px 7px">—</span>
     </div>
     <div style="flex:1"></div>
-    <div style="display:flex;align-items:center;gap:6px;background:#131519;border:1px solid #262A32;padding:3px 8px;width:240px">
+    <div id="header-search" style="display:flex;align-items:center;gap:6px;background:#131519;border:1px solid #262A32;padding:3px 8px;width:240px">
       <span style="color:#62696D;font-size:12px">&#x2315;</span>
       <input id="search" placeholder="Filter archetype, agent, map&hellip;" style="flex:1;background:transparent;border:none;outline:none;color:#E8E9EA;font-family:inherit;font-size:12px"/>
     </div>
@@ -52,10 +58,10 @@
     </div>
   </div>
 
-  <div style="flex:1;display:flex;min-height:0">
+  <div id="main-layout" style="flex:1;display:flex;min-height:0">
 
     <!-- Sidebar -->
-    <div style="width:220px;flex:none;background:#131519;border-right:1px solid #262A32;overflow-y:auto;padding-bottom:20px">
+    <div id="sidebar" style="width:220px;flex:none;background:#131519;border-right:1px solid #262A32;overflow-y:auto;padding-bottom:20px">
 
       <div style="padding:12px 12px 10px">
         <div style="font-size:10px;letter-spacing:0.12em;color:#62696D;text-transform:uppercase;margin-bottom:9px">Tier</div>
@@ -117,7 +123,10 @@
         <div id="tab-comps" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Compositions</div>
         <div id="tab-agents" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Agents</div>
         <div id="tab-maps" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Map Meta</div>
+        <div id="tab-teams" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Teams</div>
+        <div id="tab-synergy" class="tab-btn" style="display:flex;align-items:center;padding:0 14px;font-size:13px;letter-spacing:0.01em">Synergy</div>
         <div style="flex:1"></div>
+        <div id="draft-btn" style="display:flex;align-items:center;gap:5px;background:#131519;border:1px solid #262A32;padding:4px 10px;cursor:pointer;font-size:12px;color:#9AA0A8;margin-right:6px">&#x2B21; Draft Sim</div>
         <div id="scope-label" style="display:flex;align-items:center;font-size:11px;color:#62696D;font-family:ui-monospace,'SF Mono',Menlo,monospace"></div>
       </div>
 
@@ -135,6 +144,16 @@
         <span>arch key: <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">s</span>entinel &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">d</span>uelist &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">i</span>nitiator &middot; <span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9AA0A8">c</span>ontroller</span>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="draft-modal" style="display:none;position:fixed;inset:0;background:#0B0C0Eee;z-index:100;overflow:auto">
+  <div style="max-width:700px;margin:40px auto;background:#131519;border:1px solid #262A32;padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <span style="font-size:15px;font-weight:700;letter-spacing:.04em">DRAFT SIMULATOR</span>
+      <span id="draft-close" style="cursor:pointer;color:#62696D;font-size:18px">&#x2715;</span>
+    </div>
+    <div id="draft-content"></div>
   </div>
 </div>
 
@@ -187,9 +206,10 @@ const S = {
   minPick: 1,
   query: '',
   sort: {
-    comps:  { key:'nm_win_pct', dir:-1 },
-    agents: { key:'pick',     dir:-1 },
-    maps:   { key:'matches',  dir:-1 }
+    comps:   { key:'nm_win_pct', dir:-1 },
+    agents:  { key:'pick',       dir:-1 },
+    maps:    { key:'matches',    dir:-1 },
+    synergy: { key:'picks',      dir:-1 }
   },
   rawComps:  [],
   rawAgents: [],
@@ -205,7 +225,12 @@ const S = {
   seasons: {},   // { "2026": true, ... } — all true by default after load
   regions: {},   // { "Americas": true, ... }
   availSeasons: [],
-  availRegions: []
+  availRegions: [],
+  teamQuery: '',
+  teamData: null,
+  teamSearchResults: [],
+  synergyData: [],
+  trendsData: {}
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -387,17 +412,23 @@ async function fetchData() {
 
   try {
     await Promise.all([loadValApiData(), loadFilters(), loadTeamLogos()]);
-    const [cRes, aRes, mRes, sRes] = await Promise.all([
+    const [cRes, aRes, mRes, sRes, synRes, trendRes] = await Promise.all([
       fetch(`/api/comps?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
       fetch(`/api/agents?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}&min_sample=1`),
       fetch(`/api/maps/meta?tiers=${tiers}&seasons=${seasons}&regions=${regions}`),
-      fetch(`/api/stats?tiers=${tiers}&seasons=${seasons}&regions=${regions}`)
+      fetch(`/api/stats?tiers=${tiers}&seasons=${seasons}&regions=${regions}`),
+      fetch(`/api/synergy?tiers=${tiers}&seasons=${seasons}&regions=${regions}&map=${map}`),
+      fetch(`/api/trends?tiers=${tiers}&seasons=${seasons}&regions=${regions}`)
     ]);
 
     S.rawComps  = await cRes.json();
     S.rawAgents = await aRes.json();
     S.rawMaps   = await mRes.json();
     const stats = await sRes.json();
+    S.synergyData = await synRes.json();
+    const trendsRaw = await trendRes.json();
+    S.trendsData = {};
+    for (const ct of trendsRaw.comps || []) { S.trendsData[ct.comp] = ct.data; }
 
     S.totalMatches    = stats.matches     || 0;
     S.totalMapResults = stats.map_results || 0;
@@ -486,10 +517,11 @@ function renderSidebar() {
 }
 
 function renderTabs() {
-  ['comps','agents','maps'].forEach(k => {
+  ['comps','agents','maps','teams','synergy'].forEach(k => {
     const el = document.getElementById('tab-' + k);
+    if (!el) return;
     const active = S.tab === k;
-    el.style.color     = active ? '#E8E9EA' : '#9AA0A8';
+    el.style.color     = active ? '#E8E9EA' : '#62696D';
     el.style.boxShadow = active ? 'inset 0 -2px 0 #5B8DEF' : 'none';
   });
   const scopeParts = [activeTiers().map(t=>t.key).join('/') || 'no tier'];
@@ -551,6 +583,27 @@ function buildKpis() {
         subColor: avgWr ? (avgWr>=50?'#46A758':'#E5484D') : '#62696D' },
       { label:'Highest team pick%', value:topPk?topPk.pick.toFixed(1)+'%':'—', sub:topPk?topPk.name:'', subColor:'#9AA0A8' },
       { label:'Map results', value:num(S.totalMapResults), sub:'total in db' }
+    ];
+  }
+  if (S.tab === 'teams') {
+    const td = S.teamData;
+    return td
+      ? [
+          { label:'Maps Played', value:String(td.total), sub:'' },
+          { label:'Map Win Rate', value:td.win_pct+'%', sub:td.wins+'W '+(td.total-td.wins)+'L', subColor: td.win_pct>=52?'#46A758':td.win_pct>=47.5?'#5B8DEF':'#E5484D' },
+          { label:'Top Map', value: td.maps_played[0]?.map || '—', sub: td.maps_played[0]?.win_pct+'%' || '', subColor:'#9AA0A8' },
+          { label:'Top Comp', value: td.comps[0]?.comp || '—', sub: td.comps[0]?.total+'g' || '', subColor:'#62696D' }
+        ]
+      : [{ label:'Team Scouting', value:'Search a team', sub:'' }];
+  }
+  if (S.tab === 'synergy') {
+    const pairs = S.synergyData;
+    const top = pairs[0];
+    return [
+      { label:'Agent Pairs', value:String(pairs.length), sub:'≥5 appearances' },
+      { label:'Most Picked Pair', value:top ? (AGENT_DISPLAY[top.a1]||top.a1)+'+' : '—', sub:top?(AGENT_DISPLAY[top.a2]||top.a2):'', subColor:'#9AA0A8' },
+      { label:'Map Results', value:num(S.totalMapResults), sub:'total in db' },
+      { label:'Filters', value:tierParam()||'all', sub:'tier', subColor:'#62696D' }
     ];
   }
   // maps tab
@@ -623,6 +676,12 @@ function renderTable() {
     ({ rows, total } = filteredAgents());
     el = buildAgentsTable(rows);
     setSample(rows.length, total);
+  } else if (S.tab === 'teams') {
+    el = buildTeamsTab();
+    setSample(0, 0);
+  } else if (S.tab === 'synergy') {
+    el = buildSynergyTab();
+    setSample(S.synergyData.length, S.synergyData.length);
   } else {
     ({ rows, total } = filteredMaps());
     el = buildMapsTable(rows);
@@ -646,6 +705,7 @@ function hdrRow(cols, tab) {
     const align = c.right ? 'text-align:right;' : c.pl ? 'padding-left:18px;' : '';
     cell.style.cssText = `font-size:10px;letter-spacing:0.1em;text-transform:uppercase;${align}${c.sort ? 'cursor:pointer;color:#9AA0A8;' : 'color:#62696D;'}`;
     if (c.sort) cell.className = 'sort-hd';
+    if (c.title) cell.title = c.title;
     const arrow = c.sort && sk === c.sort ? (sd === -1 ? '▾' : '▴') : '';
     cell.innerHTML = c.label + (arrow ? ` <span style="color:#5B8DEF">${arrow}</span>` : '');
     if (c.sort) cell.onclick = () => {
@@ -781,10 +841,10 @@ function buildCompsTable(rows) {
   const COLS = [
     { w:'44px',              label:'#' },
     { w:'minmax(190px,1fr)', label:'Archetype',     sort:'comp',       asc:true },
-    { w:'96px',              label:'Maps',           sort:'total',      right:true },
-    { w:'168px',             label:'Non-Mirror WR',  sort:'nm_win_pct', pl:true },
-    { w:'72px',              label:'Atk WR',         sort:'atk_wr',     right:true },
-    { w:'72px',              label:'Def WR',         sort:'def_wr',     right:true },
+    { w:'96px',              label:'Maps',           sort:'total',      right:true,  title:'Total map appearances (each map counts once per team)' },
+    { w:'168px',             label:'Non-Mirror WR',  sort:'nm_win_pct', pl:true,     title:'Win rate in games where opponent used a different archetype' },
+    { w:'130px',             label:'Atk / Def',      sort:'atk_wr',                  title:'Attack-side WR / Defense-side WR' },
+    { w:'80px',              label:'Trend',                              right:true,  title:'Weekly pick rate trend over last 12 weeks' },
   ];
   const wrap = document.createElement('div');
   wrap.style.position = 'relative';
@@ -839,8 +899,8 @@ function buildCompsTable(rows) {
           <span style="font-size:10px;color:#62696D">(${r.win_pct.toFixed(1)} all)</span>
         `:`<span style="font-family:ui-monospace,monospace;font-size:12px;color:#62696D">—</span>`}
       </div>
-      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.atk_wr!=null?wrColor(r.atk_wr):'#62696D'};text-align:right">${fmt(r.atk_wr)}</div>
-      <div style="font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;color:${r.def_wr!=null?wrColor(r.def_wr):'#62696D'};text-align:right">${fmt(r.def_wr)}</div>`;
+      <div>${splitBar(r.atk_wr, r.def_wr)}</div>
+      <div style="text-align:right">${sparkline(S.trendsData[r.comp])}</div>`;
     el.onclick = () => {
       S.expanded.has(r.comp) ? S.expanded.delete(r.comp) : S.expanded.add(r.comp);
       renderMain();
@@ -957,11 +1017,15 @@ function buildMapsTable(rows) {
 // ── Status bar ────────────────────────────────────────────────────────────────
 
 function renderStatusBar() {
-  const { key, dir } = S.sort[S.tab];
+  const sortState = S.sort[S.tab];
   document.getElementById('status-line').textContent =
     `antistrat://${S.tab}?tier=${tierParam()||'none'}&map=${S.map||'all'}&min=${S.minMatches}`;
-  document.getElementById('sort-label').innerHTML =
-    `sort: <span style="color:#9AA0A8;font-family:ui-monospace,'SF Mono',Menlo,monospace">${key} ${dir===-1?'desc':'asc'}</span>`;
+  if (sortState) {
+    document.getElementById('sort-label').innerHTML =
+      `sort: <span style="color:#9AA0A8;font-family:ui-monospace,'SF Mono',Menlo,monospace">${sortState.key} ${sortState.dir===-1?'desc':'asc'}</span>`;
+  } else {
+    document.getElementById('sort-label').textContent = '';
+  }
 }
 
 // ── URL state ────────────────────────────────────────────────────────────────
@@ -985,7 +1049,7 @@ function loadStateFromURL() {
     TIERS.forEach(t => { S.tiers[t.key] = keys.includes(t.key); });
   }
   if (p.has('map')) S.map = p.get('map');
-  if (p.has('tab') && ['comps','agents','maps'].includes(p.get('tab'))) S.tab = p.get('tab');
+  if (p.has('tab') && ['comps','agents','maps','teams','synergy'].includes(p.get('tab'))) S.tab = p.get('tab');
   // seasons/regions loaded after filters API call — handled in renderSidebar via S.seasons/S.regions
   if (p.has('seasons')) {
     const keys = p.get('seasons').split(',');
@@ -1000,7 +1064,7 @@ function loadStateFromURL() {
 
 // ── Events ───────────────────────────────────────────────────────────────────
 
-['comps','agents','maps'].forEach(k => {
+['comps','agents','maps','teams','synergy'].forEach(k => {
   document.getElementById('tab-'+k).onclick = () => {
     S.tab = k; updateURL(); renderTabs(); renderMain();
   };
@@ -1035,9 +1099,309 @@ document.addEventListener('keydown', e => {
   if (e.key === '1') { S.tab = 'comps';   updateURL(); render(); }
   if (e.key === '2') { S.tab = 'agents';  updateURL(); render(); }
   if (e.key === '3') { S.tab = 'maps';    updateURL(); render(); }
+  if (e.key === '4') { S.tab = 'teams';   updateURL(); render(); }
+  if (e.key === '5') { S.tab = 'synergy'; updateURL(); render(); }
   if (e.key === 'Escape') { S.map = null; updateURL(); fetchData(); }
   if (e.key === '/') { e.preventDefault(); document.getElementById('search').focus(); }
 });
+
+// ── Sparkline & splitBar helpers ─────────────────────────────────────────────
+
+function sparkline(data) {
+  if (!data || data.length < 2) return '<span style="color:#3A3F47;font-size:10px">—</span>';
+  const vals = data.map(d => d.pick_rate);
+  const max = Math.max(...vals, 1);
+  const w = 60, h = 20;
+  const pts = vals.map((v, i) => `${(i / (vals.length-1) * w).toFixed(1)},${(h - v/max*h).toFixed(1)}`).join(' ');
+  const last = vals[vals.length-1]; const first = vals[0];
+  const color = last > first * 1.1 ? '#46A758' : last < first * 0.9 ? '#E5484D' : '#5B8DEF';
+  return `<svg width="${w}" height="${h}" style="overflow:visible"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function splitBar(atkWr, defWr) {
+  const a = atkWr ?? 50; const d = defWr ?? 50;
+  const aColor = a>=52?'#46A758':a>=47.5?'#5B8DEF':'#E5484D';
+  const dColor = d>=52?'#46A758':d>=47.5?'#5B8DEF':'#E5484D';
+  return `<div style="display:flex;align-items:center;gap:4px;font-family:ui-monospace,monospace;font-size:11px">
+    <span style="color:${aColor};width:36px;text-align:right">${atkWr!=null?atkWr.toFixed(1):'—'}</span>
+    <div style="width:50px;height:4px;background:#262A32;position:relative">
+      <div style="position:absolute;left:0;top:0;height:4px;width:${Math.max(2,Math.min(100,(a-35)/30*100)).toFixed(1)}%;background:${aColor};opacity:0.7"></div>
+    </div>
+    <span style="color:#3A3F47;font-size:9px">/</span>
+    <div style="width:50px;height:4px;background:#262A32;position:relative">
+      <div style="position:absolute;left:0;top:0;height:4px;width:${Math.max(2,Math.min(100,(d-35)/30*100)).toFixed(1)}%;background:${dColor};opacity:0.7"></div>
+    </div>
+    <span style="color:${dColor};width:36px">${defWr!=null?defWr.toFixed(1):'—'}</span>
+  </div>`;
+}
+
+// ── Teams tab ─────────────────────────────────────────────────────────────────
+
+function buildTeamsTab() {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:16px;max-width:900px';
+
+  const searchRow = document.createElement('div');
+  searchRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap';
+  searchRow.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;background:#131519;border:1px solid #262A32;padding:6px 10px;flex:1;max-width:360px">
+      <span style="color:#62696D">&#x2315;</span>
+      <input id="team-search-input" placeholder="Search team name…" value="${S.teamQuery.replace(/"/g,'&quot;')}"
+        style="flex:1;background:transparent;border:none;outline:none;color:#E8E9EA;font-family:inherit;font-size:13px"/>
+    </div>
+    <div id="team-search-results" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+  `;
+  wrap.appendChild(searchRow);
+
+  const inp = searchRow.querySelector('#team-search-input');
+  const resultsEl = searchRow.querySelector('#team-search-results');
+
+  function renderResults(teams) {
+    resultsEl.innerHTML = '';
+    teams.slice(0, 10).forEach(t => {
+      const btn = document.createElement('div');
+      btn.style.cssText = 'padding:3px 10px;background:#1B1E24;border:1px solid #262A32;font-size:12px;cursor:pointer;color:#9AA0A8';
+      btn.textContent = t;
+      btn.onmouseenter = () => btn.style.color = '#E8E9EA';
+      btn.onmouseleave = () => btn.style.color = '#9AA0A8';
+      btn.onclick = () => loadTeam(t);
+      resultsEl.appendChild(btn);
+    });
+  }
+
+  if (S.teamSearchResults.length) renderResults(S.teamSearchResults);
+
+  let _debounce;
+  inp.oninput = () => {
+    S.teamQuery = inp.value;
+    clearTimeout(_debounce);
+    if (inp.value.length < 2) { resultsEl.innerHTML = ''; return; }
+    _debounce = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/team/search?q=${encodeURIComponent(inp.value)}`);
+        S.teamSearchResults = await res.json();
+        renderResults(S.teamSearchResults);
+      } catch(e) {}
+    }, 250);
+  };
+
+  if (S.teamData) {
+    const td = S.teamData;
+    const logo = S.teamLogos[td.team];
+    const headerDiv = document.createElement('div');
+    headerDiv.style.cssText = 'background:#131519;border:1px solid #262A32;padding:16px;margin-bottom:16px';
+    headerDiv.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        ${logo ? `<img src="${logo}" style="width:40px;height:40px;object-fit:contain" onerror="this.style.display='none'">` : ''}
+        <div>
+          <div style="font-size:18px;font-weight:700;letter-spacing:.02em">${td.team}</div>
+          <div style="font-size:12px;color:#62696D;margin-top:2px">${td.total} maps played &middot; ${td.wins}W ${td.total-td.wins}L &middot; ${td.win_pct}% WR</div>
+        </div>
+        <div style="flex:1"></div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:700;color:${td.win_pct>=52?'#46A758':td.win_pct>=47.5?'#5B8DEF':'#E5484D'}">${td.win_pct}%</div>
+          <div style="font-size:10px;color:#62696D;letter-spacing:.08em">MAP WIN RATE</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:10px;color:#62696D;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Agent Pool</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${Object.entries(td.agents).slice(0,8).map(([ag, cnt]) => {
+              const ad = S.agentData[ag];
+              const name = AGENT_DISPLAY[ag] || ag;
+              return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px" title="${name}: ${cnt} picks">
+                ${ad?.icon ? `<img src="${ad.icon}" style="width:36px;height:36px;object-fit:cover;background:#1B1E24">` : `<div style="width:36px;height:36px;background:#1B1E24;display:flex;align-items:center;justify-content:center;font-size:9px;color:#62696D">${name.slice(0,3)}</div>`}
+                <span style="font-size:9px;color:#62696D">${cnt}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:10px;color:#62696D;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Comps</div>
+          ${td.comps.slice(0,5).map(c => `
+            <div style="display:flex;align-items:center;gap:8px;padding:2px 0">
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:#9AA0A8;min-width:90px">${c.comp}</span>
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D">${c.total}g</span>
+              <div style="width:40px;height:3px;background:#262A32"><div style="height:3px;width:${Math.max(2,Math.min(100,(c.win_pct-35)/30*100)).toFixed(1)}%;background:${c.win_pct>=52?'#46A758':c.win_pct>=47.5?'#5B8DEF':'#E5484D'}"></div></div>
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:${c.win_pct>=52?'#46A758':c.win_pct>=47.5?'#5B8DEF':'#E5484D'}">${c.win_pct}%</span>
+            </div>`).join('')}
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:10px;color:#62696D;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Map Record</div>
+          ${td.maps_played.slice(0,6).map(m => `
+            <div style="display:flex;align-items:center;gap:8px;padding:2px 0">
+              <span style="font-size:12px;color:#9AA0A8;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.map}</span>
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D">${m.wins}W–${m.total-m.wins}L</span>
+              <span style="font-family:ui-monospace,monospace;font-size:11px;color:${m.win_pct>=52?'#46A758':m.win_pct>=47.5?'#5B8DEF':'#E5484D'}">${m.win_pct}%</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    wrap.appendChild(headerDiv);
+
+    const recentDiv = document.createElement('div');
+    recentDiv.innerHTML = `
+      <div style="font-size:10px;color:#62696D;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Recent Maps</div>
+      <div style="background:#131519;border:1px solid #262A32">
+        <div style="display:grid;grid-template-columns:90px 80px 1fr 100px 90px 60px;gap:0;padding:6px 12px;border-bottom:1px solid #262A32;font-size:10px;color:#62696D;letter-spacing:.06em;text-transform:uppercase">
+          <span>Result</span><span>Map</span><span>Opponent</span><span>Comp</span><span>Event</span><span style="text-align:right">Date</span>
+        </div>
+        ${td.recent_maps.map(m => `
+          <div style="display:grid;grid-template-columns:90px 80px 1fr 100px 90px 60px;gap:0;padding:5px 12px;border-bottom:1px solid #1B1E24;font-size:12px;align-items:center" class="row-hover">
+            <span style="font-weight:600;color:${m.won?'#46A758':'#E5484D'}">${m.won?'WIN':'LOSS'}</span>
+            <span style="color:#9AA0A8">${m.map}</span>
+            <span style="color:#C9D1D9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.opponent}">${m.opponent}</span>
+            <span style="font-family:ui-monospace,monospace;font-size:10px;color:#62696D">${m.comp}</span>
+            <span style="color:#62696D;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.event}">${m.tier}</span>
+            <span style="font-family:ui-monospace,monospace;font-size:10px;color:#62696D;text-align:right">${(m.date||'').slice(5,10)}</span>
+          </div>`).join('')}
+      </div>`;
+    wrap.appendChild(recentDiv);
+  } else if (!S.teamQuery) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'color:#62696D;font-size:12px;padding:20px 0';
+    hint.textContent = 'Type a team name above to search (e.g. "Sentinels", "NaVi")';
+    wrap.appendChild(hint);
+  }
+
+  return wrap;
+}
+
+async function loadTeam(name) {
+  S.teamQuery = name;
+  S.teamSearchResults = [];
+  S.teamData = null;
+  S.tab = 'teams';
+  render();
+  try {
+    const res = await fetch(`/api/team?name=${encodeURIComponent(name)}&tiers=${encodeURIComponent(tierParam())}&seasons=${encodeURIComponent(seasonParam())}&regions=${encodeURIComponent(regionParam())}`);
+    S.teamData = await res.json();
+    render();
+  } catch(e) { console.error(e); }
+}
+
+// ── Synergy tab ───────────────────────────────────────────────────────────────
+
+function buildSynergyTab() {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:0;';
+
+  if (!S.synergyData.length) {
+    wrap.appendChild(emptyRow('Loading synergy data…'));
+    return wrap;
+  }
+
+  const COLS = [
+    { w:'44px',              label:'#' },
+    { w:'minmax(200px,1fr)', label:'Agent Pair',   sort:'pair',     asc:true },
+    { w:'96px',              label:'Appearances',  sort:'picks',    right:true },
+    { w:'168px',             label:'Win Rate',     sort:'win_pct',  pl:true },
+  ];
+
+  wrap.appendChild(hdrRow(COLS, 'synergy'));
+
+  const rows = sortRows(S.synergyData.map(r => ({...r, pair: r.a1 + '+' + r.a2})), 'synergy');
+  const q = S.query.toLowerCase();
+  const filtered = q ? rows.filter(r => r.a1.includes(q) || r.a2.includes(q) || (AGENT_DISPLAY[r.a1]||r.a1).toLowerCase().includes(q) || (AGENT_DISPLAY[r.a2]||r.a2).toLowerCase().includes(q)) : rows;
+
+  filtered.slice(0, 100).forEach((r, i) => {
+    const el = document.createElement('div');
+    el.className = 'row-hover';
+    el.style.cssText = `display:grid;grid-template-columns:${COLS.map(c=>c.w).join(' ')};align-items:center;padding:5px 14px;border-bottom:1px solid #1B1E24;gap:0`;
+    const ad1 = S.agentData[r.a1]; const ad2 = S.agentData[r.a2];
+    const wr = r.win_pct;
+    const conf = r.picks < 15 ? 0.5 : r.picks < 30 ? 0.75 : 1;
+    el.innerHTML = `
+      <span style="font-family:ui-monospace,monospace;font-size:11px;color:#62696D">${i+1}</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${ad1?.icon ? `<img src="${ad1.icon}" style="width:24px;height:24px;object-fit:cover;background:#1B1E24">` : `<div style="width:24px;height:24px;background:#1B1E24"></div>`}
+        ${ad2?.icon ? `<img src="${ad2.icon}" style="width:24px;height:24px;object-fit:cover;background:#1B1E24">` : `<div style="width:24px;height:24px;background:#1B1E24"></div>`}
+        <span style="font-size:12px;color:#C9D1D9">${AGENT_DISPLAY[r.a1]||r.a1} + ${AGENT_DISPLAY[r.a2]||r.a2}</span>
+      </div>
+      <span style="font-family:ui-monospace,monospace;font-size:12px;color:#9AA0A8;text-align:right">${num(r.picks)}</span>
+      <div style="display:flex;align-items:center;gap:8px;padding-left:12px">
+        <div style="width:80px;height:4px;background:#262A32;opacity:${conf}">
+          <div style="height:4px;width:${Math.max(2,Math.min(100,(wr-35)/30*100)).toFixed(1)}%;background:${wr>=52?'#46A758':wr>=47.5?'#5B8DEF':'#E5484D'}"></div>
+        </div>
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:${wr>=52?'#46A758':wr>=47.5?'#5B8DEF':'#E5484D'};opacity:${conf}">${wr.toFixed(1)}%${r.picks<15?'*':''}</span>
+      </div>`;
+    wrap.appendChild(el);
+  });
+  return wrap;
+}
+
+// ── Draft Simulator ───────────────────────────────────────────────────────────
+
+const DRAFT_STATE = { picked: [], side: 'A' };
+
+function classify_comp_js(agents) {
+  const ARCH = {
+    sentinel:   new Set(['sage','cypher','killjoy','chamber','deadlock','vyse']),
+    duelist:    new Set(['jett','raze','phoenix','neon','reyna','yoru','iso','waylay']),
+    initiator:  new Set(['sova','breach','skye','fade','kayo','gekko','tejo']),
+    controller: new Set(['viper','omen','brimstone','astra','harbor','clove'])
+  };
+  const c = {sentinel:0,duelist:0,initiator:0,controller:0};
+  for (const a of agents) { for (const [role,set] of Object.entries(ARCH)) { if(set.has(a)){c[role]++;break;} } }
+  return `${c.sentinel}s-${c.duelist}d-${c.initiator}i-${c.controller}c`;
+}
+
+function renderDraft() {
+  const content = document.getElementById('draft-content');
+  if (!content) return;
+
+  const comp_a = DRAFT_STATE.picked.filter(p => p.side === 'A').map(p => p.agent);
+  const comp_b = DRAFT_STATE.picked.filter(p => p.side === 'B').map(p => p.agent);
+
+  content.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div style="background:#1B1E24;padding:12px;border:1px solid ${DRAFT_STATE.side==='A'?'#5B8DEF':'#262A32'}">
+        <div style="font-size:10px;color:#62696D;letter-spacing:.08em;margin-bottom:8px">TEAM A ${DRAFT_STATE.side==='A'?'&#8592; picking':''}</div>
+        <div style="display:flex;gap:4px;min-height:36px">
+          ${comp_a.map(ag => {const ad=S.agentData[ag]; return ad?.icon?`<img src="${ad.icon}" style="width:34px;height:34px;object-fit:cover" title="${AGENT_DISPLAY[ag]||ag}">`:`<div style="width:34px;height:34px;background:#262A32;display:flex;align-items:center;justify-content:center;font-size:9px;color:#9AA0A8">${(AGENT_DISPLAY[ag]||ag).slice(0,3)}</div>`;}).join('')}
+          ${Array(5-comp_a.length).fill('<div style="width:34px;height:34px;border:1px dashed #262A32"></div>').join('')}
+        </div>
+        <div style="font-family:ui-monospace,monospace;font-size:10px;color:#62696D;margin-top:6px">${comp_a.length?classify_comp_js(comp_a):'—'}</div>
+      </div>
+      <div style="background:#1B1E24;padding:12px;border:1px solid ${DRAFT_STATE.side==='B'?'#E5484D':'#262A32'}">
+        <div style="font-size:10px;color:#62696D;letter-spacing:.08em;margin-bottom:8px">TEAM B ${DRAFT_STATE.side==='B'?'&#8592; picking':''}</div>
+        <div style="display:flex;gap:4px;min-height:36px">
+          ${comp_b.map(ag => {const ad=S.agentData[ag]; return ad?.icon?`<img src="${ad.icon}" style="width:34px;height:34px;object-fit:cover" title="${AGENT_DISPLAY[ag]||ag}">`:`<div style="width:34px;height:34px;background:#262A32;display:flex;align-items:center;justify-content:center;font-size:9px;color:#9AA0A8">${(AGENT_DISPLAY[ag]||ag).slice(0,3)}</div>`;}).join('')}
+          ${Array(5-comp_b.length).fill('<div style="width:34px;height:34px;border:1px dashed #262A32"></div>').join('')}
+        </div>
+        <div style="font-family:ui-monospace,monospace;font-size:10px;color:#62696D;margin-top:6px">${comp_b.length?classify_comp_js(comp_b):'—'}</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="font-size:11px;color:#62696D">Picking for: </span>
+      <div onclick="DRAFT_STATE.side='A';renderDraft()" style="padding:3px 10px;border:1px solid ${DRAFT_STATE.side==='A'?'#5B8DEF':'#262A32'};cursor:pointer;font-size:11px;color:${DRAFT_STATE.side==='A'?'#5B8DEF':'#62696D'}">Team A</div>
+      <div onclick="DRAFT_STATE.side='B';renderDraft()" style="padding:3px 10px;border:1px solid ${DRAFT_STATE.side==='B'?'#E5484D':'#262A32'};cursor:pointer;font-size:11px;color:${DRAFT_STATE.side==='B'?'#E5484D':'#62696D'}">Team B</div>
+      <div style="flex:1"></div>
+      <div onclick="DRAFT_STATE.picked=[];DRAFT_STATE.side='A';renderDraft()" style="padding:3px 10px;border:1px solid #262A32;cursor:pointer;font-size:11px;color:#62696D">Reset</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${Object.keys(AGENT_DISPLAY).map(ag => {
+        const picked = DRAFT_STATE.picked.find(p => p.agent === ag);
+        const ad = S.agentData[ag];
+        const disabled = !!picked;
+        const borderColor = picked ? (picked.side==='A'?'#5B8DEF':'#E5484D') : '#262A32';
+        const pickAction = `DRAFT_STATE.picked.push({agent:'${ag}',side:DRAFT_STATE.side});if(DRAFT_STATE.picked.filter(p=>p.side===DRAFT_STATE.side).length>=5){DRAFT_STATE.side=DRAFT_STATE.side==='A'?'B':'A';}renderDraft()`;
+        return `<div onclick="${disabled?'':pickAction}"
+          style="cursor:${disabled?'default':'pointer'};opacity:${disabled?0.4:1};border:2px solid ${borderColor};background:#1B1E24;padding:4px" title="${AGENT_DISPLAY[ag]||ag}">
+          ${ad?.icon ? `<img src="${ad.icon}" style="width:40px;height:40px;object-fit:cover;display:block">` : `<div style="width:40px;height:40px;background:#262A32;display:flex;align-items:center;justify-content:center;font-size:10px;color:#9AA0A8">${(AGENT_DISPLAY[ag]||ag).slice(0,3)}</div>`}
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+document.getElementById('draft-btn').onclick = () => {
+  document.getElementById('draft-modal').style.display = 'block';
+  renderDraft();
+};
+document.getElementById('draft-close').onclick = () => {
+  document.getElementById('draft-modal').style.display = 'none';
+};
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
